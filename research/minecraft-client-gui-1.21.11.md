@@ -226,6 +226,39 @@ Zalety: CSS daje zaokrąglone rogi, cienie, blur i animacje „za darmo", motywo
 
 **Rekomendacja:** B dla HUD i paneli, w podklasie `Screen` z własnym drzewem widgetów. Jeśli priorytetem jest efekt „wow" i szybka iteracja nad wyglądem, rozważ D jako projekt równoległy, ale wiedząc, co kosztuje.
 
+### 4.4 Tryb „bez ograniczeń": własny silnik renderowania (ścieżka C rozwinięta)
+
+Jeśli priorytetem jest **dowolne GUI, bez ram narzuconych przez `GuiGraphics`**, wybierz ścieżkę C i zbuduj własny silnik 2D. Co jest dowiedzione w kodzie Meteora (1.21.11), a co jest moją propozycją:
+
+| Możliwość | Status |
+|---|---|
+| Dowolne shadery GLSL 330 i dowolne `RenderPipeline` (własny format wierzchołków, blending, uniform buffery, samplery) | [KOD] `MeteorRenderPipelines`, `MeshRenderer` |
+| Własne tekstury i render targety poza ekranem (`device.createTexture(...)`, `createTextureView`) | [KOD] `Texture.java`, `Blur.java` |
+| Wieloprzebiegowe efekty: łańcuch tekstur mniejszych/większych, rysowanie do wskazanego celu (`attachments(target, null)`) | [KOD] `Blur.java` (down/up-sampling w pętli) |
+| Efekty pełnoekranowe (post-process: outline, obraz, blur) | [KOD] pipeline'y `POST_OUTLINE`, `POST_IMAGE`, `BLUR_*` |
+| Własny atlas tekstu (TTF → STB) i atlas ikon (`TexturePacker`) | [KOD] `Font.java`, `GuiRenderer.java` |
+| Rysowanie na wierzchu całego GUI vanilli, w pikselach fizycznych | [KOD] `GameRendererMixin`, `GuiRenderer.begin` |
+| Własna pętla wejścia (`Screen` przechwytuje mysz/klawiaturę, własne drzewo widgetów) | [KOD] `WidgetScreen` |
+| **Uber-shader** z kształtami SDF wybieranymi atrybutem (prostokąt, okrąg, linia, obraz, tekst) w jednym batchu | [SZKIC/propozycja], wzorzec atrybutów wierzchołków z sekcji 5.3 |
+| **Tekst MSDF** (ostry przy dowolnym skalowaniu) zamiast zwykłego atlasu | [WIEDZA], nie sprawdzałem w kodzie klientów |
+| Cienie, szkło (frosted glass), maski, przejścia między ekranami, cache warstw do tekstur | możliwe na bazie powyższych klocków; propozycja |
+
+**Zalecana struktura silnika:**
+
+1. `UiRenderer` zbiera polecenia (prostokąt, tekst, obraz, clip, warstwa) do jednej listy w trakcie ekstrakcji.
+2. Na końcu klatki sortuje je w warstwy, układa w kilka dużych meshy (po pipeline'ie i teksturze) i rysuje kilkoma `drawIndexed`.
+3. Warstwy z efektami (blur tła, cień) trafiają najpierw do tekstur offscreen, a potem są komponowane.
+4. Wejście wstrzykujesz w `Screen`, a rysowanie w mixinie za `GuiRenderer.render` (wzorzec z sekcji 4.3 C).
+
+**Co nadal Cię ogranicza (bez względu na ścieżkę):**
+
+- W 1.21.11 rysowanie idzie przez abstrakcję Blaze3D (`GpuDevice`, `RenderPass`, `CommandEncoder`). Surowe wywołania OpenGL są nieprzewidywalne, więc trzymaj się tego API. [DOK: ostrzeżenie w `basic-concepts.md`]
+- Nie sprawdzałem, czy API pozwala na compute shadery. [WIEDZA/niezweryfikowane]
+- Każda aktualizacja gry (1.21.11 → 26.x) zmienia wnętrza, więc własny silnik trzeba utrzymywać i izolować w jednym pakiecie (patrz sekcja 8).
+- Inne mody renderujące (Sodium, Iris) mogą kolidować. Meteor ma na to osobne mixiny kompatybilności. [KOD]
+
+**Gdy chcesz wyglądu bez żadnych granic** (CSS, SVG, animacje jak w aplikacji), ścieżka D (UI w przeglądarce) daje największą swobodę wizualną kosztem ciężkich zależności natywnych.
+
 ---
 
 ## 5. Zaokrąglone rogi
