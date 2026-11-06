@@ -14,6 +14,7 @@ Każde twierdzenie ma znacznik. Czytaj go zanim zaufasz kodowi.
 | **[KOD]** | Sprawdzone bezpośrednio w kodzie źródłowym (repo + commit w tabeli źródeł na końcu). |
 | **[DOK]** | Z oficjalnej dokumentacji Fabric (repo `fabric-docs`, wersjonowane `1.21.11`). |
 | **[WIEDZA]** | Moja wiedza ogólna. **Niezweryfikowana** w tej sesji. Traktuj jako hipotezę. |
+| **[SKILL]** | Z bazy wiedzy modderskiej (skill `minecraft-modding`, tabela wersji „zweryfikowana 2026-10-05"). Nie sprawdzałem tego osobiście w tej sesji; zweryfikuj przed bumpem wersji. |
 | **[SZKIC]** | Kod napisany przeze mnie na podstawie wzorców z [KOD]. **Nie był kompilowany ani uruchamiany.** |
 
 ---
@@ -26,7 +27,8 @@ Każde twierdzenie ma znacznik. Czytaj go zanim zaufasz kodowi.
 4. **Zaokrąglone rogi robi się shaderem SDF**, nie teksturami. Jedno `RenderPipeline` + własny format wierzchołków + `GuiElementRenderState`. Tak robi LiquidBounce, a w 1.21.11 działa to przez `GuiGraphics.guiRenderState`. Per-element uniformy **nie działają** (GUI jest batchowane), więc promień i rozmiar idą jako atrybuty wierzchołków. [KOD]
 5. **Cztery drogi do własnego GUI** (sekcja 4.3). Rekomendacja: **ścieżka B** (własne elementy w pipeline'ie GUI Minecrafta) + własne drzewo widgetów w podklasie `Screen`. Ścieżka D (UI w przeglądarce, jak LiquidBounce) daje najlepszy wygląd, ale to osobny, ciężki projekt.
 6. **Licencje:** Meteor i LiquidBounce to **GPL-3.0**. Kopiowanie ich kodu wymusza GPL na Twoim kliencie. Uczyć się z architektury można, a kod pisz własny. [KOD]
-7. **Testuj GUI zrzutami ekranu** przez Fabric Client Game Tests (`takeScreenshot` / `assertScreenshotEquals`). [KOD/DOK]
+7. **Dowolne GUI, 2D i 3D, na 1.21.11 i na najnowszej wersji** (Mojang mappings): tak, da się. Tryb „bez ograniczeń" (ścieżka C) plus własny pipeline 3D. Jak to zorganizować, żeby jeden projekt obsługiwał obie wersje, opisuje sekcja 4.5.
+8. **Testuj GUI zrzutami ekranu** przez Fabric Client Game Tests (`takeScreenshot` / `assertScreenshotEquals`). [KOD/DOK]
 
 ---
 
@@ -258,6 +260,80 @@ Jeśli priorytetem jest **dowolne GUI, bez ram narzuconych przez `GuiGraphics`**
 - Inne mody renderujące (Sodium, Iris) mogą kolidować. Meteor ma na to osobne mixiny kompatybilności. [KOD]
 
 **Gdy chcesz wyglądu bez żadnych granic** (CSS, SVG, animacje jak w aplikacji), ścieżka D (UI w przeglądarce) daje największą swobodę wizualną kosztem ciężkich zależności natywnych.
+
+---
+
+### 4.5 Dowolne GUI (2D i 3D) na 1.21.11 i na najnowszej wersji, w Mojang mappings
+
+**Cel:** móc zbudować *jakiekolwiek* GUI, płaskie albo przestrzenne, na **1.21.11** oraz na **najnowszym wydaniu**, zawsze na nazwach Mojanga (bez Yarn i bez intermediary).
+
+#### Co to znaczy „najnowsza wersja" i „Mojang mappings"
+
+| Wersja | Java | Nazwy w kodzie | Remap przy buildzie | Źródło |
+|---|---|---|---|---|
+| **1.21.11** | 21 | Mojang mappings (oficjalne), gra jest jeszcze obfuskowana | tak, Loom mapuje na czas działania | [DOK] sekcja 2 |
+| **26.1 i nowsze** (stabilnie do **26.3**; 26.4 było tylko w snapshotach na 2026-10-05) | **25** | nazwy Mojanga są **natywne**, gra jest bez obfuskacji | **nie** (bez `remapJar`, bez intermediary, bez Yarn) | [SKILL] |
+
+Dla 26.x Fabric Loader to u nich wszystkich 0.19.5, a Fabric API ma tag `+<wersja MC>` (np. `0.161.0+26.3`). [SKILL] Numery dryfują, a od 2026-10-05 mogło wyjść coś nowszego niż 26.3. Przed startem sprawdź aktualną wersję w `meta.fabricmc.net` i manifeście Mojanga. W tej sesji nie miałem do nich dostępu (patrz sekcja 9).
+
+#### Jeden projekt, dwie wersje: układ
+
+Kodu GUI nie da się skompilować raz na obie wersje, bo między 1.21.11 a 26.x zmieniają się klasy renderowania (sekcja 8). Dlatego:
+
+```
+core/            logika klienta, widgety, motyw, layout: BEZ importów z net.minecraft.client.renderer
+ui-api/          interfejsy: UiGraphics, Mesh3D, Camera3D, InputSource
+backend-1_21_11/ implementacja na 1.21.11 (GuiGraphics, GuiElementRenderState, Java 21)
+backend-26_x/    implementacja na najnowszą (GuiGraphicsExtractor, nowe pakiety renderowania, Java 25)
+```
+
+- Dwa osobne moduły Gradle, każdy z własnym Loomem (1.21.11: plugin `fabric-loom` z Mojang mappings; 26.x: nowy plugin bez mapowań, Java 25). Jeden wspólny `core`/`ui-api` skompilowany na Javie 21 (bajtkod ładuje się na 25). [SKILL + DOK, SZKIC układu]
+- W `fabric.mod.json` dwa JAR-y z zależnością `minecraft` (`~1.21.11` oraz `>=26.1`) albo dwa buildy tego samego kodu. Fabric nie zadziała z jednym JAR-em na obie wersje, jeśli dotykasz wnętrz renderera. [WIEDZA]
+- Każdą wersję najpierw **kompiluj od zera** (`clean compileJava`), bo kompilator potrafi „zdradzić" liczbą błędów. Dla nowej wersji różnice wyciągaj przez `javap` na jarze docelowego Minecrafta, a nie z pamięci. [SKILL]
+
+#### 2D: co możesz zrobić dowolnie
+
+Wszystko z sekcji 4.4 i 5: własne `RenderPipeline`, shadery SDF (zaokrąglone rogi, cienie, szkło), własny tekst, warstwy offscreen, rysowanie nad całym GUI vanilli w pikselach fizycznych. Dotyczy:
+
+- pełnych ekranów (`Screen`), nakładek HUD (`HudElementRegistry`), okien przeciąganych wewnątrz jednego ekranu, edytora HUD,
+- GUI w przeglądarce (ścieżka D), jeśli wolisz CSS zamiast własnego silnika.
+
+Na 26.2 i dalej GUI jest już w pełni „retained": `GuiGraphics` jest przemianowane na `GuiGraphicsExtractor` i tylko zbiera elementy. [SKILL + DOK] Na obu wersjach element musi być obiektem stanu, nie wywołaniem GL.
+
+#### 3D: trzy realne warianty [WIEDZA + SZKIC, nie testowałem żadnego]
+
+1. **Obiekt 3D wewnątrz GUI 2D** (podgląd modelu, gracza, przedmiotu, wykres 3D). Renderujesz scenę do **tekstury offscreen** (własny `RenderPass` + kamera z własną macierzą projekcji i głębią), a potem rysujesz tę teksturę jako zwykły prostokąt w GUI. Odporne na zmiany GUI, bo 3D jest odizolowane. Vanilla robi podobnie dla podglądu encji w ekwipunku, ale tamtejsze API zmieniało się między wersjami, więc własny render-to-texture jest stabilniejszy. [WIEDZA]
+2. **GUI w świecie** (panel zawieszony w przestrzeni, billboard nad blokiem, hologram). Rysujesz w fazie renderowania świata własnym pipeline'em z głębią i macierzami kamery. Wzorzec „render przez ściany" masz w `fabric-docs` `rendering/world.md` (wersja 1.21.11). [DOK] Panel może być płaskim quadem z teksturą, na którą wcześniej wyrenderowałeś zwykłe GUI (wariant 1 odwrócony: 2D → tekstura → quad 3D).
+3. **Cały ekran 3D** (menu jako scena, obracające się karty, głębia parallax). `Screen` bez tła vanilli, a w jego `render` własny pipeline z macierzą perspektywy i buforem głębi, wyczyszczonym przed rysowaniem 3D (to samo `clearDepthTexture`, które robi Meteor w sekcji 4.3 C). Wejście myszy przeliczasz przez odwróconą macierz na promień. [WIEDZA + SZKIC]
+
+Wspólne zasady dla 3D: własny format wierzchołków (pozycja `vec3`, normalna, UV, kolor), własny shader, głębia włączona tylko dla tego przebiegu, po nim przywróć stan, żeby nie zepsuć GUI vanilli. Kolizje z Sodium/Iris omówione w sekcji 8 dotyczą także 3D.
+
+#### Interfejs, który to spina [SZKIC, nie kompilowany]
+
+```java
+// ui-api: kod GUI nigdy nie widzi klas Minecrafta
+public interface UiGraphics {
+    void roundedRect(float x, float y, float w, float h, float radius, int argb);
+    void text(String s, float x, float y, int argb, float size);
+    void texture(UiTexture t, float x, float y, float w, float h);
+    void pushClip(float x, float y, float w, float h);
+    void popClip();
+    void scene3d(Scene3D scene, float x, float y, float w, float h); // render-to-texture
+}
+
+public interface WorldUi { // wariant 2: GUI w przestrzeni świata
+    void panel(Vec3 pos, Quat rot, float widthMeters, UiPanel content);
+}
+```
+
+Backend 1.21.11 i backend 26.x implementują te same interfejsy innymi klasami Minecrafta. Dzięki temu widgety, motyw i logika są napisane raz.
+
+#### Co jest pewne, a co nie
+
+- **Pewne** [DOK/KOD]: dowolne shadery, pipeline'y, offscreen i rysowanie nad GUI działają na 1.21.11 (dowód: Meteor, LiquidBounce).
+- **Wzięte z bazy wiedzy** [SKILL]: tabela wersji 26.x (Java 25, brak remapu, GuiGraphicsExtractor).
+- **Hipotezy** [WIEDZA/SZKIC]: warianty 3D, interfejsy powyżej, pojedynczy wspólny `core`. Nie mam jara Minecrafta ani kompilacji, więc przed pracą zrób mały prototyp „czerwony trójkąt 3D w GUI" na obu wersjach.
+- **Nie sprawdzałem**, czy w najnowszej wersji (26.3, a tym bardziej nowszych) nadal działa wzorzec hooka za `GuiRenderer.render` z 4.3 C. W 26.3 `RenderPipeline` leży w innym pakiecie (sekcja 8), więc backend 26.x napisz od nowa, a nie portuj przez zamianę nazw.
 
 ---
 
