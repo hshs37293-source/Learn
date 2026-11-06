@@ -356,6 +356,8 @@ public record BoxStyle(Paint fill, Border border, Shadow[] shadows, float[] corn
 4. **Utrzymanie przy aktualizacjach gry.** Wszystko, co dotyka wnętrz renderowania, trzeba izolować za `UiGraphics` (sekcja 8).
 5. **Stylu „przeglądarkowego" (pełny CSS, złożona typografia, SVG z filtrami)** nie odtworzysz tanio natywnie. Do tego służy ścieżka D (4.3).
 
+Szczegóły implementacyjne (7 klocków własnego renderera, hook „na wierzchu", przebiegi offscreen, pułapki) są w osobnym przewodniku: [custom-rendering-gui-guide.md](custom-rendering-gui-guide.md).
+
 **Wniosek:** przy ścieżce C z powyższą warstwą nie ma stylu wizualnego, którego nie dałoby się zbudować z prymitywów, efektów i `custom(...)`. Granicą nie jest silnik, tylko nakład pracy i kompatybilność z modami renderującymi.
 
 ---
