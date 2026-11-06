@@ -22,7 +22,7 @@ Każde twierdzenie ma znacznik. Czytaj go zanim zaufasz kodowi.
 1. [Jak rozumiem zadanie](#1-jak-rozumiem-zadanie)
 2. [Wersje i toolchain](#2-wersje-i-toolchain)
 3. [Anatomia nowoczesnego klienta](#3-anatomia-nowoczesnego-klienta)
-4. [Silnik renderowania w 1.21.11](#4-silnik-renderowania-w-12111-to-co-musisz-wiedzieć) (w tym wybór ścieżki GUI: 4.3, tryb bez ograniczeń: 4.4)
+4. [Silnik renderowania w 1.21.11](#4-silnik-renderowania-w-12111-to-co-musisz-wiedzieć) (w tym wybór ścieżki GUI: 4.3, tryb bez ograniczeń: 4.4, architektura „dowolny styl": 4.5)
 5. [Zaokrąglone rogi](#5-zaokrąglone-rogi)
 6. [Menu i ClickGUI](#6-menu-i-clickgui-układ-widgety-motyw-animacje-tekst)
 7. [Testowanie i debugowanie GUI](#7-testowanie-i-debugowanie-gui)
@@ -39,7 +39,7 @@ Każde twierdzenie ma znacznik. Czytaj go zanim zaufasz kodowi.
 2. **1.21.11 to ostatnia wersja z obfuskacją.** 26.1+ to nowy plugin Loom, Java 25, inne nazwy, a „żadne mody dla 1.21.11 lub starszych nie działają na 26.1, nawet jako zależność compile-only". [DOK] Pisz kod z cienką warstwą abstrakcji nad renderowaniem, żeby migracja nie bolała (sekcja 8).
 3. **Architektura klienta** (wzorzec Meteora i LiquidBounce): `Module` + `Setting` + magistrala zdarzeń + mixiny jako źródło zdarzeń + osobny system HUD + komendy + konfig + system dodatków (addonów). Szczegóły w sekcji 3.
 4. **Zaokrąglone rogi robi się shaderem SDF**, nie teksturami. Jedno `RenderPipeline` + własny format wierzchołków + `GuiElementRenderState`. Tak robi LiquidBounce, a w 1.21.11 działa to przez `GuiGraphics.guiRenderState`. Per-element uniformy **nie działają** (GUI jest batchowane), więc promień i rozmiar idą jako atrybuty wierzchołków. [KOD]
-5. **Cztery drogi do własnego GUI** (sekcja 4.3). Rekomendacja: **ścieżka B** (własne elementy w pipeline'ie GUI Minecrafta) + własne drzewo widgetów w podklasie `Screen`. Ścieżka D (UI w przeglądarce, jak LiquidBounce) daje najlepszy wygląd, ale to osobny, ciężki projekt.
+5. **Cztery drogi do własnego GUI** (sekcja 4.3). Rekomendacja: **ścieżka B** (własne elementy w pipeline'ie GUI Minecrafta) + własne drzewo widgetów w podklasie `Screen`. Ścieżka D (UI w przeglądarce, jak LiquidBounce) daje najlepszy wygląd, ale to osobny, ciężki projekt. Jeśli chcesz **dowolnego GUI w dowolnym stylu**, patrz 4.5 (prymitywy + styl jako dane + wyjście awaryjne na własny shader).
 6. **Licencje:** Meteor i LiquidBounce to **GPL-3.0**. Kopiowanie ich kodu wymusza GPL na Twoim kliencie. Uczyć się z architektury można, a kod pisz własny. [KOD]
 7. **Testuj GUI zrzutami ekranu** przez Fabric Client Game Tests (`takeScreenshot` / `assertScreenshotEquals`). [KOD/DOK]
 
@@ -284,6 +284,79 @@ Jeśli priorytetem jest **dowolne GUI, bez ram narzuconych przez `GuiGraphics`**
 - Inne mody renderujące (Sodium, Iris) mogą kolidować. Meteor ma na to osobne mixiny kompatybilności. [KOD]
 
 **Gdy chcesz wyglądu bez żadnych granic** (CSS, SVG, animacje jak w aplikacji), ścieżka D (UI w przeglądarce) daje największą swobodę wizualną kosztem ciężkich zależności natywnych.
+
+### 4.5 Architektura „dowolne GUI w dowolnym stylu"
+
+> **Status:** to propozycja projektowa, nie opis istniejącego kodu. Składa klocki z sekcji 4.3–4.4 i 5 (dowiedzione w Meteorze i LiquidBounce, patrz znaczniki tam) w jedną architekturę. Całość `[SZKIC]`/`[WIEDZA]`, niczego nie kompilowałem.
+
+**Zasada:** styl nie może być zaszyty w kodzie widgetów. Rozdziel cztery warstwy, a wtedy zmiana stylu nie dotyka pozostałych:
+
+| Warstwa | Odpowiada za | Zmienia się, gdy… |
+|---|---|---|
+| **Prymitywy** (silnik rysowania) | co w ogóle da się narysować | dodajesz nową możliwość wizualną |
+| **Styl** (dane: motyw, klasy stylów) | jak wygląda każdy element | zmieniasz wygląd |
+| **Widgety** | zachowanie i układ (klik, scroll, fokus) | dodajesz nowy typ kontrolki |
+| **Efekty / warstwy** | blur, cień, maski, przejścia, post-process | chcesz „szkło", poświatę, animowane przejścia |
+
+**Zestaw prymitywów, z którego da się złożyć praktycznie każdy styl:**
+
+| Prymityw | Technika | Status |
+|---|---|---|
+| Prostokąt z promieniem **osobnym dla każdego rogu** | SDF (5.2) + 4 promienie | [WIEDZA], rozszerzenie wzoru |
+| Obramowanie (wewnątrz / na zewnątrz / środek), kreskowane | SDF (5.4) | [KOD] podstawa, reszta [WIEDZA] |
+| Wypełnienie: jednolite, gradient liniowy / radialny / stożkowy | kolory w atrybutach lub parametry gradientu | [KOD] gradient pionowy, reszta [WIEDZA] |
+| Cień zewnętrzny i wewnętrzny, poświata (glow) | większy quad + zanik po `d` | [WIEDZA] (5.4) |
+| Rozmycie tła (glassmorphism) | pass offscreen: down/up-sampling | [KOD] Meteor `Blur.java`, LiquidBounce `ui_blur_*` |
+| Obraz / sprite, 9-slice, tryb `nearest` (pixel-art) | tekstura + filtr | [WIEDZA] |
+| Ścieżki wektorowe (SVG, własne kształty) | teselacja do trójkątów lub SDF dla prostych kształtów | [WIEDZA] |
+| Tekst: dowolny font, ostry przy każdym skalowaniu | atlas STB [KOD] lub MSDF [WIEDZA] | zob. 6.6 |
+| Maska / clip o zaokrąglonym kształcie | stencil lub SDF w shaderze | [WIEDZA] |
+| Warstwa z przezroczystością, transformacją (obrót, skala), trybem mieszania | render do tekstury offscreen + kompozycja | [KOD] wzorzec offscreen (Blur), reszta [WIEDZA] |
+| Szum / ziarno / tekstura proceduralna | funkcje w shaderze | [WIEDZA] |
+
+**Jak z tego wychodzą style (przykłady):**
+
+| Styl | Z czego się składa |
+|---|---|
+| Płaski / Material | prostokąt, mały promień, cień, jeden akcent |
+| Glassmorphism | rozmycie tła + półprzezroczysty gradient + cienkie obramowanie |
+| Neumorfizm | dwa cienie (jasny i ciemny) + wypełnienie w kolorze tła |
+| Neon / cyberpunk | obramowanie + poświata + gradient + ewentualnie szum |
+| Retro / pixel-art | sprite'y 9-slice, filtr `nearest`, skalowanie całkowite, font bitmapowy |
+| Skeuomorficzny | tekstury, cienie wewnętrzne, gradienty, obrazy |
+| W stylu vanilli | sprite'y z zasobów gry (ścieżka A) |
+
+**Styl jako dane, nie kod.** Motyw to plik (JSON/TOML) z tokenami (kolory, promienie, odstępy, fonty, czasy animacji) oraz **klasami stylów** (`button`, `button:hover`, `panel.glass`) opisującymi, jakich prymitywów użyć i z jakimi parametrami. Widget pyta motyw „jak mam wyglądać w stanie X" i nie zna szczegółów. Dzięki temu możesz podmieniać style bez rekompilacji i przeładowywać je na żywo (hot reload). Podobne wzorce są w kodzie: motyw jako `Settings` z trzema stanami w Meteorze (6.2) oraz motywy ładowane z URL-a w LiquidBounce (4.3 D). [KOD]
+
+**Szkic interfejsu warstwy rysowania** (jedyna rzecz, od której zależą widgety; konkretny pipeline stoi za nią):
+
+```java
+public interface UiGraphics {
+    void box(Rect r, BoxStyle s);              // wypełnienie + obramowanie + cień + promienie rogów
+    void text(String s, Font f, float x, float y, Paint p);
+    void image(Texture t, Rect dst, ImageStyle s);   // 9-slice, filtr, tint
+    void path(Path p, PathStyle s);            // wektory
+    void pushClip(Rect r, float[] cornerRadii);
+    void popClip();
+    void pushLayer(LayerStyle s);              // opacity, transformacja, blur tła, tryb mieszania
+    void popLayer();
+    void custom(Rect r, ShaderEffect e);       // wyjście awaryjne: własny shader
+}
+
+public record BoxStyle(Paint fill, Border border, Shadow[] shadows, float[] cornerRadii /* 4 */) {}
+```
+
+**Wyjście awaryjne = brak sufitu.** Jeśli prymitywy nie wystarczą, `custom(...)` pozwala podpiąć **własny fragment shader** dla jednego widgetu (np. animowane tło, plazma, wykres). Kosztuje to przerwanie batcha (osobny draw-call), ale w ścieżce C (własny pipeline) nie obowiązuje ograniczenie „brak uniformów per element" z sekcji 4.1, bo to dotyczy wyłącznie batchowanych elementów GUI vanilli. [WIEDZA co do konsekwencji; sam batching: KOD]
+
+**Realne ograniczenia tej architektury (uczciwie):**
+
+1. **Dane elementu w wierzchołku.** Prostokąt z obramowaniem, gradientem, 4 promieniami i cieniem potrzebuje więcej parametrów niż dwa kanały `UV1/UV2` ze szkicu 5.3. Rozwiązania: szerszy format wierzchołków, dane w UBO/teksturze danych indeksowane z wierzchołka. Każde wymaga sprawdzenia, co dopuszcza `RenderPipeline` w 1.21.11. [WIEDZA, niezweryfikowane]
+2. **Compute shadery** (np. do zaawansowanych efektów) nie zostały sprawdzone w API Blaze3D. [WIEDZA, niezweryfikowane]
+3. **Wydajność.** Uber-shader z wieloma gałęziami i wielopasowe efekty (blur) kosztują; nie mierzyłem. Wzorzec obrony: cache warstw statycznych do tekstur, blur w obniżonej rozdzielczości. [WIEDZA]
+4. **Utrzymanie przy aktualizacjach gry.** Wszystko, co dotyka wnętrz renderowania, trzeba izolować za `UiGraphics` (sekcja 8).
+5. **Stylu „przeglądarkowego" (pełny CSS, złożona typografia, SVG z filtrami)** nie odtworzysz tanio natywnie. Do tego służy ścieżka D (4.3).
+
+**Wniosek:** przy ścieżce C z powyższą warstwą nie ma stylu wizualnego, którego nie dałoby się zbudować z prymitywów, efektów i `custom(...)`. Granicą nie jest silnik, tylko nakład pracy i kompatybilność z modami renderującymi.
 
 ---
 
