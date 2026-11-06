@@ -1,0 +1,5 @@
+classTweaker v1 official
+# Dostęp do stanu GUI, aby dodać własny element (SDF) do renderowania — jak w LiquidBounce (26.x).
+accessible class net/minecraft/client/gui/GuiGraphicsExtractor$ScissorStack
+accessible field net/minecraft/client/gui/GuiGraphicsExtractor scissorStack Lnet/minecraft/client/gui/GuiGraphicsExtractor$ScissorStack;
+accessible field net/minecraft/client/gui/GuiGraphicsExtractor guiRenderState Lnet/minecraft/client/renderer/state/gui/GuiRenderState;

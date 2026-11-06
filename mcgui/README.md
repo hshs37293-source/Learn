@@ -6,7 +6,6 @@ Biblioteka do robienia własnych interfejsów w modach Fabric. Nazwy Mojang, jed
 core/            czysty Java 21, BEZ Minecrafta: widgety, layout, motywy, animacje, 2D i 3D, rasteryzacja
 mc-1_21_11/      adapter dla 1.21.11 (osobny projekt Gradle, Loom "remap", Java 21)
 mc-26/           adapter dla 26.x   (osobny projekt Gradle, Loom bez mapowań, Java 25)
-shaders/         opcjonalne szkice shaderów SDF (niepodłączone)
 scripts/         test-core.sh: kompilacja i testy rdzenia samym javac
 ```
 
@@ -14,9 +13,9 @@ scripts/         test-core.sh: kompilacja i testy rdzenia samym javac
 
 | Część | Status |
 |---|---|
-| `core/` (≈3700 linii kodu + ≈480 linii testów) | **Kompiluje się i przechodzi 51 testów** (`./scripts/test-core.sh` oraz `gradle runTests`) |
+| `core/` (≈3800 linii kodu + ≈620 linii testów) | **Kompiluje się i przechodzi 63 testy** (`./scripts/test-core.sh` oraz `gradle runTests`) |
 | `SimpleBackend`, `Rasterizer`, 9-slice, motywy JSON, layout, wejście, projekcja 3D | testowane w rdzeniu na atrapie powierzchni |
-| `mc-1_21_11/`, `mc-26/` (≈900 linii z konfiguracją Gradle) | **NIEKOMPILOWANE.** Piszę je w środowisku bez dostępu do serwerów Fabric/Mojang. Sygnatury wzięte z kodu referencyjnego Fabric docs (kompilowanego w ich CI) i z kodu Meteora; lista rzeczy do sprawdzenia poniżej |
+| `mc-1_21_11/`, `mc-26/` (≈1200 linii z konfiguracją Gradle i shaderami) | **NIEKOMPILOWANE.** Piszę je w środowisku bez dostępu do serwerów Fabric/Mojang. Sygnatury wzięte z kodu referencyjnego Fabric docs (kompilowanego w ich CI) i z kodu Meteora; lista rzeczy do sprawdzenia poniżej |
 | Wygląd w grze, wydajność, Vulkan | **nie sprawdzane** |
 
 Uczciwie: rdzeń działa i jest testowany; **adaptery pod grę musisz zbudować i poprawić** (spodziewaj się drobnych błędów w nazwach).
@@ -24,7 +23,7 @@ Uczciwie: rdzeń działa i jest testowany; **adaptery pod grę musisz zbudować 
 ## Szybki start
 
 ```bash
-./scripts/test-core.sh          # kompilacja + 51 testów, tylko JDK 21, bez sieci
+./scripts/test-core.sh          # kompilacja + 63 testy, tylko JDK 21, bez sieci
 # albo
 gradle runTests                 # w katalogu mcgui/
 ```
@@ -69,8 +68,8 @@ Widgety: `Label`, `Button`, `Toggle`, `Slider`, `TextField`, `ProgressBar`, `Ima
 2. **Własny widget.** Dziedziczysz po `Widget` i rysujesz przez `UiGraphics`: `box`, `text`, `image` (także 9-slice),
    `path` (dowolne ścieżki, krzywe), `line`, `pushClip`, `pushTranslate/Rotate/Scale`, `pushLayer`, `custom`.
    Przykład: `core/.../demo/RadialMeter.java` (okrągły miernik z łuków). Widget działa na obu liniach gry bez zmian.
-3. **Własny backend.** Implementujesz `UiGraphics` (albo tylko `Surface`) po swojemu, np. z shaderami SDF
-   (`shaders/`, `research/mc-client/06`). Widgety i motywy zostają bez zmian.
+3. **Własny backend.** Implementujesz `UiGraphics` (albo tylko `Surface`) po swojemu, np. z innymi shaderami
+   (`research/mc-client/06`). Widgety i motywy zostają bez zmian. Gładkie krawędzie shaderem SDF są już wbudowane (sekcja niżej).
 
 ## 3D
 
@@ -98,7 +97,34 @@ Widgety: `Label`, `Button`, `Toggle`, `Slider`, `TextField`, `ProgressBar`, `Ima
 ale `World3D` w `mc-26/` jest napisany pod 26.2 (kod referencyjny Fabric docs) i dla 26.3 wymaga dostosowania importów
 i sygnatur draw. Szczegóły migracji: `research/mc-client/02-migracja-1.21.11-do-26.x.md` i `04-api-renderowania.md`.
 
-## Co umie `SimpleBackend` (domyślny backend, bez shaderów)
+## Bez pikselozy: gładkie krawędzie
+
+Skąd bierze się „pikseloza" i co z tym zrobiono:
+
+| Źródło | Rozwiązanie w repo |
+|---|---|
+| Zaokrąglenia rysowane paskami `fill` wyglądają schodkowo, zwłaszcza przy małym GUI scale | **Shader SDF** (`mc-*/.../shaders/core/sdf_box.vsh/fsh`): krawędź ma pokrycie piksela liczone z odległości, więc jest gładka w każdej skali. Obsługuje 4 różne promienie rogów, obrys (inside/center/outside), cień z rozmyciem i gradienty (bilinearnie z 4 narożników) |
+| Cienie z warstw wyglądają „pasmowo" | w SDF cień to jeden quad z gładkim zanikiem |
+| Tekst skalowany ułamkowo się rozmywa | `SimpleBackend.crispText` (domyślnie włączone): skala fontu w krokach co 0.5, pozycja tekstu zaokrąglona do pełnych pikseli fizycznych |
+| Rysowanie w jednostkach GUI zamiast pikseli | cały backend pracuje w **pikselach fizycznych** (macierz 1/guiScale), więc kształty nie są powiększanymi pikselami |
+| Tekstury powiększane filtrem NEAREST/LINEAR | zależy od tekstury gry (`blur` w `.mcmeta`); dla pixel-artu celowo zostaw ostro, dla ikon wektorowych użyj `path(...)` zamiast obrazów |
+
+Jak to działa: `SimpleBackend.box()` pyta powierzchnię `surface.supportsSdf()`. Jeśli tak, zamienia `BoxStyle` na elementy SDF
+(`SdfEmitter`: cień → wypełnienie → obrys) i wysyła je do shadera (`McSurface.drawSdf`). Jeśli nie (albo ustawisz
+`McSurface.sdfEnabled = false`), używa pasków z antyaliasingiem krawędzi. Dzięki temu masz awaryjny tryb, gdy pipeline nie ruszy.
+
+**Sprawdzone testami (w rdzeniu, bez GPU):** pakowanie parametrów w atrybuty wierzchołka (obieg bez strat), kolejność i geometria
+elementów, gradienty, skala logiczne→fizyczne, ostry tekst oraz **matematyka z shadera w wersji CPU** (`SdfMath`): suma pokrycia
+pikseli zaokrąglonego prostokąta zgadza się z polem geometrycznym, każdy z czterech promieni trafia w swój róg, obrys ma pole
+obwód×grubość, cień maleje monotonicznie, a krawędź na ułamku piksela daje pokrycie częściowe (płynne przejście zamiast schodka).
+
+**Niesprawdzone:** sam shader GLSL się nie kompilował (brak gry), wygląd na ekranie, wydajność. Ryzyka do sprawdzenia:
+(1) czy shadery o ścieżce `mcgui:core/sdf_box` zostaną znalezione przez vanilli (`assets/mcgui/shaders/core/`) — jeśli nie,
+użyj ładowania własnego jak w Meteorze (mixin na `ShaderManager.apply` + `compilePipeline`, opisane w `research/mc-client/04`);
+(2) czy `GuiElementRenderState` ma dokładnie te metody (`buildVertices`, `pipeline`, `textureSetup`, `scissorArea`, `bounds`);
+(3) zapis class tweakera w `build.gradle`. **Nadal brak:** rozmycia tła (`backdropBlur`) i cieni wewnętrznych.
+
+## Co umie `SimpleBackend` (tryb awaryjny, bez shaderów)
 
 Działa na każdej wersji, bo używa tylko `fill`/`fillGradient`/tekstu/`blit`/scissor:
 zaokrąglone rogi z osobnymi promieniami i antyaliasingiem krawędzi, obramowanie (inside/center/outside),
@@ -106,7 +132,7 @@ cienie (warstwy), gradient pionowy, ścieżki i linie (rasteryzacja trójkątów
 
 **Nie umie:** rozmycia tła (`backdropBlur` ignorowane, więc styl `glass` wygląda jak półprzezroczysty, bez blura),
 gradientów innych niż pionowe (używa koloru średniego), cieni wewnętrznych, zaokrąglonego przycinania (scissor jest prostokątny),
-`custom(...)` poza zarejestrowanymi ręcznie efektami. Do tego służy backend z shaderami (poziom 3 wyżej).
+`custom(...)` poza zarejestrowanymi ręcznie efektami. Rozmycie tła wymaga osobnego przebiegu offscreen (opis: `research/mc-client/06`), którego jeszcze nie ma.
 
 ## Do weryfikacji przy pierwszym buildzie adapterów
 

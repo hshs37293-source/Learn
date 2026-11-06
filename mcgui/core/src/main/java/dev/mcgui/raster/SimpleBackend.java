@@ -41,6 +41,9 @@ public final class SimpleBackend implements UiGraphics {
     private final Map<String, BiConsumer<Rect, ShaderEffect>> effects = new HashMap<>();
     private float alpha = 1f;
 
+    /** Ostry tekst: skala fontu zaokrąglana do wielokrotności 0.5, pozycja do pełnych pikseli (mniej rozmycia). */
+    public boolean crispText = true;
+
     public SimpleBackend(Surface surface) {
         this.surface = surface;
         this.s = surface.guiScale();
@@ -51,7 +54,10 @@ public final class SimpleBackend implements UiGraphics {
 
     // ---------- pomiar ----------
 
-    private float fontScale(TextStyle st) { return (st.size() / 9f) * s; }
+    private float fontScale(TextStyle st) {
+        float f = (st.size() / 9f) * s;
+        return crispText ? Math.max(0.5f, Math.round(f * 2f) / 2f) : f;     // krok 0.5: unika rozmycia przy skali ułamkowej
+    }
 
     @Override public Size measure(CharSequence text, TextStyle style) {
         float fs = fontScale(style);
@@ -62,6 +68,10 @@ public final class SimpleBackend implements UiGraphics {
 
     @Override public void box(Rect r, BoxStyle st) {
         float x = r.x() * s, y = r.y() * s, w = r.w() * s, h = r.h() * s;
+        if (surface.supportsSdf()) {                          // gładkie krawędzie: shader SDF
+            for (SdfElement e : SdfEmitter.emit(new Rect(x, y, w, h), st, s, alpha)) surface.drawSdf(e);
+            return;
+        }
         CornerRadii radii = st.radii().scale(s).clampTo(w, h);
         for (Shadow sh : st.shadows()) if (!sh.inset() && sh.isVisible()) drawShadow(x, y, w, h, radii, sh);
         if (st.fill().isVisible()) fillShape(x, y, w, h, radii, st.fill());
@@ -126,7 +136,9 @@ public final class SimpleBackend implements UiGraphics {
             if (st.align() == TextStyle.Align.CENTER) px += (wpx - tw) / 2f;
             else if (st.align() == TextStyle.Align.RIGHT) px += wpx - tw;
         }
-        surface.drawText(text, px, y * s, Color.multiplyAlpha(st.color(), alpha), st.shadow(), fs);
+        float py = y * s;
+        if (crispText) { px = Math.round(px); py = Math.round(py); }          // pozycja w pełnych pikselach fizycznych
+        surface.drawText(text, px, py, Color.multiplyAlpha(st.color(), alpha), st.shadow(), fs);
     }
 
     // ---------- obrazy ----------

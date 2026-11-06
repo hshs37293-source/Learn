@@ -7,6 +7,10 @@ import dev.mcgui.input.InputEvent;
 import dev.mcgui.math.*;
 import dev.mcgui.style.*;
 import dev.mcgui.raster.Rasterizer;
+import dev.mcgui.raster.SdfElement;
+import dev.mcgui.raster.SdfMath;
+import dev.mcgui.raster.SdfEmitter;
+import dev.mcgui.raster.SdfPacking;
 import dev.mcgui.raster.SimpleBackend;
 import dev.mcgui.raster.Surface;
 import dev.mcgui.util.Json;
@@ -436,6 +440,123 @@ public final class TestMain {
             }
         });
 
+        System.out.println("== SDF (gładkie krawędzie) ==");
+        test("SdfPacking: obieg rozmiaru i promieni, ograniczenia zakresu", () -> {
+            CornerRadii r = new CornerRadii(3.5f, 0f, 12f, 63.5f);
+            eq(r, SdfPacking.unpackRadii(SdfPacking.radiiX(r), SdfPacking.radiiY(r)));
+            near(100.25, SdfPacking.decodeSize(SdfPacking.encodeSize(100.25f)), 1e-6);
+            near(63.5, SdfPacking.decodeRadius(SdfPacking.encodeRadius(500f)), 1e-6);          // obcięte do maksimum
+            eq(32767, SdfPacking.encodeSize(1e9f));
+            yes(SdfPacking.radiiX(CornerRadii.all(63.5f)) <= 32767, "mieści się w 16 bitach ze znakiem");
+        });
+        test("SdfEmitter: kolejność cień → wypełnienie → obrys, geometria cienia i obrysu", () -> {
+            BoxStyle st = BoxStyle.builder().fill(0xFFFF0000).radius(4).border(2, 0xFF00FF00)
+                .shadow(new Shadow(1, 2, 6, 3, 0xFF000000, false)).build();
+            var els = SdfEmitter.emit(Rect.of(10, 20, 40, 30), st, 2f, 1f);
+            eq(3, els.size());
+            eq(SdfElement.Kind.SHADOW, els.get(0).kind()); eq(SdfElement.Kind.FILL, els.get(1).kind()); eq(SdfElement.Kind.OUTLINE, els.get(2).kind());
+            SdfElement sh = els.get(0);
+            near(12, sh.param(), 1e-5);                                                          // blur 6 * scale 2
+            near(40 + 2 * 6 + 2 * 12, sh.w(), 1e-4);                                             // szerokość + 2*spread(6) + 2*blur(12)
+            near(40 + 2 * 6, sh.shapeW(), 1e-4);                                                 // sam kształt: bez blura
+            near(10 + 2 - 6 - 12, sh.x(), 1e-4);                                                 // x + dx*scale - spread - blur
+            near(8 + 6, sh.radii().tl(), 1e-4);                                                  // promień 4*2 + spread
+            near(4, els.get(2).param(), 1e-5);                                                   // obrys 2*scale
+        });
+        test("SdfEmitter: położenie obrysu inside/center/outside", () -> {
+            for (var c : new Object[][]{ {Border.Placement.INSIDE, 0f}, {Border.Placement.CENTER, 2f}, {Border.Placement.OUTSIDE, 4f} }) {
+                BoxStyle st = BoxStyle.builder().border(new Border(4, 0xFFFFFFFF, (Border.Placement) c[0])).build();
+                var o = SdfEmitter.emit(Rect.of(0, 0, 20, 20), st, 1f, 1f).get(0);
+                near(-(float) c[1], o.x(), 1e-5); near(20 + 2 * (float) c[1], o.w(), 1e-5);
+            }
+        });
+        test("SdfEmitter: gradienty → kolory narożników (bilinearnie)", () -> {
+            int a = 0xFFFF0000, b = 0xFF0000FF;
+            var v = SdfEmitter.corners(Paint.vertical(a, b), 1f);
+            eq(a, v[0]); eq(a, v[1]); eq(b, v[2]); eq(b, v[3]);
+            var h = SdfEmitter.corners(Paint.horizontal(a, b), 1f);
+            eq(a, h[0]); eq(b, h[1]); eq(b, h[2]); eq(a, h[3]);
+            var d = SdfEmitter.corners(Paint.diagonal(a, b), 1f);
+            eq(a, d[0]); eq(b, d[2]); eq(Color.mix(a, b, 0.5f), d[1]); eq(d[1], d[3]);
+            eq(0x80FF0000, SdfEmitter.corners(Paint.solid(a), 0.5f)[0]);                         // alfa warstwy
+        });
+        test("SimpleBackend + powierzchnia SDF: box idzie do shadera, nie paskami; skala logiczne→fizyczne", () -> {
+            SdfSurface sf = new SdfSurface(2f);
+            new SimpleBackend(sf).box(Rect.of(1, 2, 10, 5), BoxStyle.builder().fill(0xFFFFFFFF).radius(2).border(1, 0xFF000000).build());
+            eq(0, sf.fills); eq(2, sf.sdf.size());
+            near(2, sf.sdf.get(0).x(), 1e-5); near(20, sf.sdf.get(0).w(), 1e-5);
+            near(4, sf.sdf.get(0).radii().tl(), 1e-5);
+            var big = new SdfSurface(2f);
+            new SimpleBackend(big).box(Rect.of(0, 0, 10, 5), BoxStyle.builder().fill(0xFFFFFFFF).radius(3).build());
+            near(5, big.sdf.get(0).radii().tl(), 1e-5);                       // 6 ograniczone do połowy krótszego boku (10px/2)
+        });
+        test("pełne demo GUI na powierzchni SDF: wszystkie boxy to elementy SDF, brak pasków dla boxów", () -> {
+            for (String th : new String[]{"flat", "glass", "neon", "pixel"}) {
+                SdfSurface sf = new SdfSurface(2f);
+                UiRoot r = DemoUi.build(Themes.builtin(th), new DemoUi.Model());
+                r.render(new SimpleBackend(sf));
+                yes(sf.sdf.size() > 10, th + ": mało elementów SDF " + sf.sdf.size());
+                yes(sf.balanced(), "niezbalansowane");
+            }
+        });
+        test("ostry tekst: skala co 0.5, pozycja w pełnych pikselach (można wyłączyć)", () -> {
+            SdfSurface sf = new SdfSurface(2f);
+            TextStyle ts = TextStyle.DEFAULT.withSize(10);
+            new SimpleBackend(sf).text("x", 3.3f, 1.2f, ts);
+            near(2.0, sf.lastTextScale, 1e-6); near(7, sf.lastTextX, 1e-6); near(2, sf.lastTextY, 1e-6);   // 2.22→2.0; 6.6→7; 2.4→2
+            SdfSurface sf2 = new SdfSurface(2f);
+            SimpleBackend raw = new SimpleBackend(sf2); raw.crispText = false;
+            raw.text("x", 3.3f, 1.2f, ts);
+            near(10 / 9.0 * 2, sf2.lastTextScale, 1e-5); near(6.6, sf2.lastTextX, 1e-4);
+        });
+
+        test("SdfMath: pokrycie pikseli zaokrąglonego prostokąta ≈ pole geometryczne (gładkie krawędzie)", () -> {
+            float w = 40.3f, h = 24.7f, r = 7f;
+            double sum = 0;
+            for (int y = -4; y < 30; y++) for (int x = -4; x < 46; x++) {
+                float d = SdfMath.distance(x + 0.5f - w / 2f, y + 0.5f - h / 2f, w / 2f, h / 2f, CornerRadii.all(r));
+                sum += SdfMath.fillCoverage(d, 1f);
+            }
+            near(w * h - (4 - Math.PI) * r * r, sum, 1.0);
+        });
+        test("SdfMath: cztery różne promienie trafiają w właściwe rogi", () -> {
+            CornerRadii r = new CornerRadii(10, 0, 0, 0);                    // tylko lewy-górny
+            float d0 = SdfMath.distance(-19.5f, -9.5f, 20, 10, r);           // narożnik tl: odcięty łukiem → na zewnątrz
+            float d1 = SdfMath.distance(19.5f, -9.5f, 20, 10, r);            // narożnik tr: ostry → wewnątrz
+            yes(d0 > 0.5f && d1 < 0, "tl zaokrąglony (d=" + d0 + "), tr ostry (d=" + d1 + ")");
+            CornerRadii rb = new CornerRadii(0, 0, 10, 0);                   // tylko prawy-dolny
+            yes(SdfMath.distance(19.5f, 9.5f, 20, 10, rb) > 0.5f && SdfMath.distance(-19.5f, 9.5f, 20, 10, rb) < 0, "br");
+        });
+        test("SdfMath: obrys ma pole ≈ obwód * grubość, wnętrze puste", () -> {
+            float w = 30f, h = 20f, line = 2f; double ring = 0;
+            for (int y = -3; y < 24; y++) for (int x = -3; x < 34; x++) {
+                float d = SdfMath.distance(x + 0.5f - w / 2f, y + 0.5f - h / 2f, w / 2f, h / 2f, CornerRadii.NONE);
+                ring += SdfMath.outlineCoverage(d, line, 1f);
+            }
+            near(w * h - (w - 2 * line) * (h - 2 * line), ring, 1.0);
+            near(0, SdfMath.outlineCoverage(SdfMath.distance(0, 0, 15, 10, CornerRadii.NONE), line, 1f), 1e-6);
+        });
+        test("SdfMath: cień maleje monotonicznie od krawędzi, ~0.5 na krawędzi, 0 daleko", () -> {
+            float prev = 2f;
+            for (float d = -10; d <= 10; d += 0.5f) {
+                float a = SdfMath.shadowCoverage(d, 8f);
+                yes(a <= prev + 1e-6f, "monotoniczność przy d=" + d); prev = a;
+            }
+            near(0.5, SdfMath.shadowCoverage(0, 8f), 1e-5);
+            near(0, SdfMath.shadowCoverage(10, 8f), 1e-6); near(1, SdfMath.shadowCoverage(-10, 8f), 1e-6);
+        });
+        test("SDF: krawędź na ułamku piksela daje pokrycie częściowe (płynna, bez schodków)", () -> {
+            // półpłaszczyzna wypełniona dla y >= edge; środek piksela y=0.5, odległość ze znakiem d = edge - 0.5 (ujemna = wewnątrz)
+            float[] edges = { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f };
+            float prev = 2f;
+            for (float edge : edges) {
+                float c = SdfMath.fillCoverage(edge - 0.5f, 1f);
+                near(1.0 - edge, c, 1e-6);                        // pokrycie = ułamek piksela pod krawędzią
+                yes(c < prev, "pokrycie maleje wraz z przesuwaniem krawędzi w dół");
+                prev = c;
+            }
+        });
+
         System.out.println("\nWynik: " + passed + " zaliczonych, " + failed + " niezaliczonych");
         if (failed > 0) { failures.forEach(f -> System.out.println(" - " + f)); System.exit(1); }
     }
@@ -464,6 +585,31 @@ public final class TestMain {
         public void drawImage(TextureRef t, Rect dst, Rect src, ImageStyle st, int tint, float tw, float th) {
             images++; if (src != null) imageSrcArea += src.w() * src.h();
         }
+        public void pushClip(float a, float b, float c, float d) { clip++; }
+        public void popClip() { clip--; }
+        public void pushMatrix() { matrix++; }
+        public void popMatrix() { matrix--; }
+        public void translate(float dx, float dy) {}
+        public void scale(float sx, float sy) {}
+        public void rotateAbout(float r, float px, float py) {}
+        public float guiScale() { return gui; }
+        public long nowMillis() { return 1000; }
+    }
+
+    /** Powierzchnia testowa z obsługą SDF: zbiera elementy SDF i ostatnie parametry tekstu. */
+    static final class SdfSurface implements Surface {
+        final float gui; int fills, clip, matrix; final List<SdfElement> sdf = new ArrayList<>();
+        float lastTextScale, lastTextX, lastTextY;
+        SdfSurface(float gui) { this.gui = gui; }
+        boolean balanced() { return clip == 0 && matrix == 0; }
+        public boolean supportsSdf() { return true; }
+        public void drawSdf(SdfElement e) { sdf.add(e); }
+        public void fillRect(float x0, float y0, float x1, float y1, int argb) { fills++; }
+        public void fillGradientV(float x0, float y0, float x1, float y1, int t, int b) { fills++; }
+        public void drawText(CharSequence t, float x, float y, int c, boolean sh, float sc) { lastTextX = x; lastTextY = y; lastTextScale = sc; }
+        public float textWidth(CharSequence t, float sc) { return t.length() * 5f * sc; }
+        public float lineHeight(float sc) { return 9f * sc; }
+        public void drawImage(TextureRef t, Rect dst, Rect src, ImageStyle st, int tint, float tw, float th) {}
         public void pushClip(float a, float b, float c, float d) { clip++; }
         public void popClip() { clip--; }
         public void pushMatrix() { matrix++; }

@@ -3,12 +3,15 @@ package dev.mcgui.mc;
 import dev.mcgui.gfx.ImageStyle;
 import dev.mcgui.gfx.TextureRef;
 import dev.mcgui.math.Rect;
+import dev.mcgui.raster.SdfElement;
 import dev.mcgui.raster.Surface;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.util.Util;
+import org.joml.Matrix3x2f;
 
 /**
  * {@link Surface} dla Minecrafta 1.21.11 (nazwy Mojang) oparta o {@link GuiGraphics}.
@@ -60,6 +63,22 @@ public final class McSurface implements Surface, AutoCloseable {
         int rw = src == null ? tw : r(src.w()), rh = src == null ? th : r(src.h());
         // Uwaga: przeciążenie z kolorem (tint) jest założeniem — sprawdź w IDE (patrz README, sekcja "Do weryfikacji").
         g.blit(RenderPipelines.GUI_TEXTURED, e.id(), r(dst.x()), r(dst.y()), u, v, r(dst.w()), r(dst.h()), rw, rh, tw, th, tint);
+    }
+
+    // ---------- SDF (gładkie krawędzie) ----------
+
+    /** Wyłącz (false), by wymusić rysowanie paskami, np. do porównania wyglądu lub przy problemach z shaderem. */
+    public static boolean sdfEnabled = true;
+
+    @Override public boolean supportsSdf() { return sdfEnabled; }
+
+    @Override public void drawSdf(SdfElement e) {
+        Matrix3x2f pose = new Matrix3x2f(g.pose());                       // kopia: stan żyje dłużej niż to wywołanie
+        ScreenRectangle rect = new ScreenRectangle(
+            (int) Math.floor(e.x()), (int) Math.floor(e.y()), (int) Math.ceil(e.w()) + 1, (int) Math.ceil(e.h()) + 1).transformMaxBounds(pose);
+        ScreenRectangle scissor = g.scissorStack.peek();
+        ScreenRectangle bounds = scissor != null ? scissor.intersection(rect) : rect;
+        g.guiRenderState.submitGuiElement(new SdfGuiElement(e, pose, scissor, bounds));
     }
 
     @Override public void pushClip(float x0, float y0, float x1, float y1) { g.enableScissor(r(x0), r(y0), r(x1), r(y1)); }

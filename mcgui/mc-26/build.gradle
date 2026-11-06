@@ -14,6 +14,11 @@ sourceSets {
     }
 }
 
+loom {
+    // Class tweaker (dawniej access widener): patrz src/main/resources/mcgui.classtweaker
+    accessWidenerPath = file('src/main/resources/mcgui.classtweaker')
+}
+
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"

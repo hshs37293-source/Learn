@@ -6,6 +6,7 @@
   "description": "Biblioteka GUI 2D i 3D z motywami i stylami (rdzeń niezależny od wersji gry).",
   "license": "CC0-1.0",
   "environment": "client",
+  "accessWidener": "mcgui.classtweaker",
   "entrypoints": {
     "client": [ "dev.mcgui.mc.McGuiClient" ]
   },

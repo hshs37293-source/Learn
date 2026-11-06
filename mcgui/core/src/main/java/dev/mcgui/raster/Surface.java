@@ -32,6 +32,12 @@ public interface Surface {
     void scale(float sx, float sy);
     void rotateAbout(float radians, float px, float py);
 
+    /** Czy powierzchnia umie rysować elementy SDF (gładkie krawędzie shaderem). Domyślnie nie → paski. */
+    default boolean supportsSdf() { return false; }
+
+    /** Rysuje element SDF (tylko gdy {@link #supportsSdf()}). */
+    default void drawSdf(SdfElement element) {}
+
     /** Mnożnik GUI (piksele fizyczne na jednostkę logiczną). */
     float guiScale();
     long nowMillis();
