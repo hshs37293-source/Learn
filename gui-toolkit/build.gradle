@@ -1,0 +1,9 @@
+plugins { id 'java-library' }
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } } // bajtkod 21 ładuje się też na Javie 25
+
+// Zero zależności zewnętrznych: testy to zwykły program (Check.main), uruchamiany przez `gradle check-ui`.
+tasks.register('check-ui', JavaExec) {
+    dependsOn classes, testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.learn.ui.Check'
+}
