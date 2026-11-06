@@ -1,123 +1,136 @@
-# Przewodnik: własny rendering GUI w Minecraft 1.21.11 (ścieżka C, „rysuj co chcesz")
+# Przewodnik: własny rendering GUI w Minecraft 26.x (ścieżka C, „rysuj co chcesz")
 
 - **Data:** 2026-11-06
-- **Uzupełnia:** [minecraft-client-gui-1.21.11.md](minecraft-client-gui-1.21.11.md), sekcje 4.3 C, 4.4 i 4.5 (tam jest „co i dlaczego", tutaj „jak to się składa w praktyce").
-- **Cel:** mieć własny silnik rysowania, który nie jest ograniczony przez `GuiGraphics`: własne shadery, formaty wierzchołków, tekstury, przebiegi offscreen i efekty pełnoekranowe.
-- **Źródło faktów:** kod Meteor Client, gałąź `1.21.11`, commit `4803071` (2026-08-10), pliki w `renderer/`, `mixin/GameRendererMixin.java`, `mixin/ShaderLoaderMixin.java`, `systems/modules/render/Blur.java`, shadery w `assets/meteor-client/shaders/`. Przeczytałem je w tej sesji.
+- **Cel wersji:** **26.3** (najnowsza linia w kodzie klientów). Dodatek A mówi, co zmieniło się względem 1.21.11.
+- **Uzupełnia:** [minecraft-client-gui-1.21.11.md](minecraft-client-gui-1.21.11.md), sekcje 4.3 C, 4.4, 4.5 i 8 (tam jest „co i dlaczego", tutaj „jak to się składa w praktyce").
+- **Dlaczego ta wersja:** pierwsza wersja przewodnika powstała na gałęzi `1.21.11` Meteora. To była stara linia: w 26.x zmieniło się całe API renderowania (patrz niżej). Ten dokument jest przepisany na podstawie **najnowszego kodu**.
+- **Źródła faktów** (przeczytane w tej sesji):
+  - **Meteor Client**, gałąź `master`, commit `e3a2e77` (2026-10-27).
+  - **LiquidBounce**, gałąź `nextgen`, commit `2a3762a` (2026-11-06).
+  - Pliki wymieniono w sekcji 10.
 
 ## Legenda pewności
 
 | Znacznik | Znaczenie |
 |---|---|
-| **[KOD]** | Przeczytane w kodzie Meteora @`4803071`. Nic nie uruchamiałem ani nie kompilowałem. |
+| **[KOD]** | Przeczytane w kodzie Meteora `e3a2e77` lub LiquidBounce `2a3762a`. Niczego nie uruchamiałem ani nie kompilowałem. |
 | **[SZKIC]** | Mój kod/projekt, niekompilowany, oparty na wzorcach z [KOD]. |
-| **[WIEDZA]** | Z ogólnej wiedzy, niezweryfikowane. |
-
-## Uwaga o nazwach (mapowania)
-
-Gałąź `1.21.11` Meteora używa **nazw Yarn**, a w głównym raporcie zalecam **Mojang mappings**. Te same klasy mają różne nazwy. Wzorce są takie same, nazwy trzeba przetłumaczyć. Przykłady z tego, co widziałem [KOD] i co znam: [WIEDZA co do odpowiedników]
-
-| Yarn (kod Meteora) | Mojang (zalecane w raporcie) |
-|---|---|
-| `MinecraftClient` | `Minecraft` |
-| `DrawContext` | `GuiGraphics` |
-| `VertexFormat.DrawMode` | `VertexFormat.Mode` |
-| `net.minecraft.client.gl.Framebuffer` | `com.mojang.blaze3d.pipeline.RenderTarget` |
-| `GameRenderer.renderWorld` / `render` | te same nazwy metod, inne klasy pomocnicze |
-
-Klasy z pakietu `com.mojang.blaze3d.*` (`RenderPipeline`, `RenderPass`, `GpuBuffer`, `GpuTextureView`, `VertexFormat`, `RenderSystem`) mają w obu mapowaniach te same nazwy. [KOD]
+| **[WIEDZA]** | Wniosek lub wiedza ogólna, niezweryfikowane. |
 
 ---
 
-## 1. Anatomia własnego renderera: 7 klocków
+## 0. Najważniejsze zmiany w 26.x (co musisz wiedzieć na start)
 
-Wszystko, co Meteor rysuje poza vanillą, składa się z tych samych siedmiu elementów. Rozumiejąc je, możesz narysować cokolwiek.
+1. **Nowa warstwa GPU: pakiet `com.mojang.renderpearl.api.*`.** `RenderPipeline`, `RenderPass`, `CommandEncoder`, `GpuDevice`, `GpuBuffer(Slice)`, `GpuTextureView`, `GpuSampler`, `VertexFormat`, `GpuFormat`, `IndexType` wszystkie mieszkają tam, a nie w `com.mojang.blaze3d.*`. [KOD]
+2. **Gra ma wiele backendów graficznych.** Meteor ma osobne mixiny dla `GlDevice`, `VulkanDevice` i `MetalDevice` (m.in. do globalnego scissora). [KOD] Wniosek: **nie pisz kodu zależnego od OpenGL**; używaj wyłącznie `renderpearl.api`. [WIEDZA co do wniosku]
+3. **Nazwy Mojang wszędzie.** 26.x nie ma obfuskacji (`Minecraft`, `GuiGraphicsExtractor`, `Identifier`, `PoseStack`, `RenderTarget`). [KOD]
+4. **GUI to faza „extract".** Klasa nazywa się `GuiGraphicsExtractor`, metody `extractRenderState(...)`, a elementy dodajesz przez `guiRenderState.addGuiElement(...)` (w 1.21.11 było `submitGuiElement`). [KOD]
+5. **Shadery:** pliki `.vsh` / `.fsh`, na początku `#version 330` oraz `#extension GL_ARB_separate_shader_objects : require`, a **wszystkie** `in`/`out` (także między vertex a fragment) mają jawny `layout(location = N)`. Działa `#include <minecraft:...>`. [KOD]
 
-| # | Klocek | Jak jest zrobiony w Meteorze [KOD] |
+## 1. Anatomia własnego renderera w 26.x: 8 klocków
+
+| # | Klocek | Jak jest zrobiony w kodzie [KOD] |
 |---|---|---|
-| 1 | **Format wierzchołków** | `VertexFormat.builder().add("Position", POS2).add("Color", VertexFormatElement.COLOR)…build()`. Własny element `POS2` (2 floaty) rejestrowany przez `VertexFormatElement.register(id, 0, Type.FLOAT, Usage.POSITION, 2)`. Wolny `id` szukany pętlą od 0; **limit 32 elementów w całej grze** (przy przekroczeniu wyjątek „Too many mods registering VertexFormatElements"). |
-| 2 | **Pipeline** | Builder oparty o `RenderPipeline.Builder`: `withLocation`, `withVertexFormat(format, DrawMode)`, `withVertexShader`, `withFragmentShader`, `withSampler("u_Texture")`, `withUniform("Nazwa", UniformType.UNIFORM_BUFFER)`, `withDepthTestFunction`, `withDepthWrite`, `withBlend(BlendFunction.TRANSLUCENT)`, `withCull`. Wspólne uniformy trafiają do **snippetu** (`RenderPipeline.builder().withUniform(...).buildSnippet()`). |
-| 3 | **Shadery** | Pliki `.vert` / `.frag` w `assets/<modid>/shaders/`, `#version 330 core`, atrybuty przez `layout (location = N) in …`, uniformy w blokach `layout (std140) uniform Nazwa { … }`. |
-| 4 | **Prekompilacja** | Gra sama nie zna Twoich pipeline'ów. Mixin na `ShaderLoader.apply(…)` (`@At("TAIL")`) woła `device.precompilePipeline(pipeline, (identifier, shaderType) -> źródło-tekstowe)`, gdzie źródło czytane jest z `ResourceManager`. Dzięki hookowi pod koniec `apply` działa to też po przeładowaniu zasobów (F3+T). |
-| 5 | **Bufory** | `MeshBuilder` buduje wierzchołki i indeksy do `GpuBuffer` (indeksy typu `INT`). Dla pełnoekranowego trójkąta/quada jest jeden współdzielony vbo+ibo (`FullScreenRenderer`). |
-| 6 | **Uniformy** | Blok `MeshData { mat4 u_Proj; mat4 u_ModelView; }` zapisywany co rysowanie przez `DynamicUniformStorage` + `Std140Builder`; storage czyszczony raz na klatkę (`flipFrame`). Zwraca `GpuBufferSlice`, który wiążesz przez `pass.setUniform("MeshData", slice)`. |
-| 7 | **Render pass** | `RenderSystem.getDevice().createCommandEncoder().createRenderPass(() -> "nazwa", colorView, clearColor[, depthView, clearDepth])` → `setPipeline` → `setUniform(...)` → `bindTexture(nazwa, view, sampler)` → `setVertexBuffer(0, vbo)` → `setIndexBuffer(ibo, IndexType.INT)` → `drawIndexed(0, 0, liczbaIndeksów, 1)` → `close()`. |
+| 1 | **Format wierzchołków** | `VertexFormat.builder(stepRate).addAttribute("Nazwa", GpuFormat.X)…build()`. Przykłady: `RG32_FLOAT` (2 floaty), `RGBA8_UNORM` (kolor 4 bajty). Komentarz Meteora: „Step rate = 0 means per-vertex (not instanced)", co sugeruje, że niezerowy krok oznacza dane **per instancja**. LiquidBounce składa własne formaty z semantycznych nazw vanilli (`UV0/UV1/UV2`, `LINE_WIDTH`). **Nie ma już rejestracji `VertexFormatElement` ani limitu 32.** |
+| 2 | **Pipeline** | `RenderPipeline.Builder`: `withLocation(id)`, `withVertexBinding(0, format)`, `withPrimitiveTopology(PrimitiveTopology.TRIANGLES / QUADS / DEBUG_LINES)`, `withVertexShader(id)`, `withFragmentShader(id)`, `withBindGroupLayout(...)`, `withDepthStencilState(new DepthStencilState(CompareOp.ALWAYS_PASS, false))`, `withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))`, `withCull(bool)`, `withShaderDefine("UI")`. |
+| 3 | **Bind groups (uniformy i tekstury)** | `BindGroupLayout.builder().withUniform("MeshData", UniformType.UNIFORM_BUFFER).withUniform("u_Texture", UniformType.COMBINED_IMAGE_SAMPLER).build()`; dołączane do pipeline'u (też jako część snippetu). Vanilla ma gotowe układy: `BindGroupLayouts.DYNAMIC_TRANSFORMS`, `PROJECTION`, `SAMPLER0`. |
+| 4 | **Shadery** | `assets/<modid>/shaders/*.vsh|fsh`. Przykład z Meteora: ten sam shader obsługuje 2D i 3D przez `#ifdef UI` (definiowane `withShaderDefine("UI")`). |
+| 5 | **Kompilacja pipeline'ów** | Dwie sprawdzone drogi, patrz sekcja 2. |
+| 6 | **Bufory** | `device.createBuffer(() -> "nazwa", GpuBuffer.USAGE_VERTEX, dane)` albo przejściowo: `encoder.transientMemory().uploadGpu(dane, wyrównanie, USAGE_VERTEX)` → `GpuBufferSlice` (offset+długość). Uniformy dynamiczne: `DynamicGpuDataStorageMapped<>(nazwa, rozmiar, USAGE_UNIFORM, 16)`, zapis przez `Std140Builder`, czyszczenie raz na klatkę (`endFrame()`). |
+| 7 | **Tekstury** | `device.createTexture(label, flagi, GpuFormat.RGBA8_UNORM, w, h, 1, 1)` + `createTextureView`; sampler z `RenderSystem.getSamplerCache()` (np. `getClampToEdge(FilterMode.NEAREST)`). |
+| 8 | **Render pass** | `try (RenderPass pass = encoder.createRenderPass(() -> "nazwa", colorView, Optional<Vector4fc> clear[, depthView, OptionalDouble]))` → `pass.setPipeline(RenderSystem.getCompiledPipeline(pipeline))` → `setUniform(nazwa, bufferSlice)` → `setUniform(nazwa, textureView, sampler)` → `setVertexBuffer(0, slice)` → `setIndexBuffer(buffer, IndexType.INT)` → `drawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)`. `RenderPass` jest `AutoCloseable`. |
 
-Wniosek: **rysowanie nie jest ograniczone do GUI vanilli.** Masz zwykły potok GPU: bufory, shadery, tekstury, wiele przebiegów. Ograniczeniem jest tylko to, że robisz to przez abstrakcję Blaze3D, a nie surowy OpenGL.
+Wniosek: **rysowanie nie jest ograniczone do GUI vanilli.** Masz zwykły nowoczesny potok GPU (bufory, bind groupy, wiele przebiegów, instancing w sygnaturze `drawIndexed`).
 
-## 2. Jak zrobić, żeby własne GUI rysowało się na wierzchu
+## 2. Dwie sprawdzone drogi rejestracji pipeline'u
 
-Meteor rozwiązuje to w `GameRendererMixin` [KOD]:
+### Droga 1: „niech vanilla skompiluje" (LiquidBounce) [KOD]
+```
+RenderPipeline.Builder().withLocation(id).…build()  →  RenderPipelines.register(pipeline)
+```
+Pipeline trafia do rejestru vanilli i jest kompilowany razem z resztą. Do elementów GUI dołącza się gotowy `RenderPipelines.GUI_SNIPPET` (lub `GUI_TEXTURED_SNIPPET`), który niesie macierze i układy bind group. **Najprostsza droga dla elementów dodawanych do GUI przez `GuiElementRenderState`.**
 
-1. `@Inject` w `GameRenderer.render`, w miejscu **bezpośrednio po** wywołaniu `GuiRenderer.render(...)` (`At.Shift.AFTER`), więc po całym GUI vanilli.
-2. Gdy otwarty jest ekran Meteora (`WidgetScreen`): `guiState.clear()`, nowy `DrawContext`, wywołanie własnej metody `renderCustom(...)` ekranu.
-3. Wyczyszczenie głębi: `createCommandEncoder().clearDepthTexture(framebuffer.getDepthAttachment(), 1.0)`.
-4. Ręczne „spłukanie" stanu GUI: `guiRenderer.render(fogRenderer.getFogBuffer(FogType.NONE))` i `guiRenderer.incrementFrame()` (metoda `meteor$flushGuiState`).
+### Droga 2: „kompiluj sam" (Meteor) [KOD]
+Mixin w `ShaderManager.apply` wstrzyknięty tuż przed `RenderSystem.setCurrentPipelineCache(...)` i przekazujący `PipelineCache` z `@Local`. W środku dla każdego pipeline'u:
+1. Zbuduj `ShaderSource` (metody `getShader(id, type)` czytająca z `ResourceManager`, `getInclude(id)` oraz `close()`); includes z `ShaderManager.listAllIncludes(resources)`.
+2. `device.compilePipeline(pipeline, shaderSource, executor)` → `CompletableFuture<CompiledRenderPipeline.Pending>`.
+3. `.join().finishCompile()` → `cache.insert(pipeline, compiled)`.
 
-Rysowanie w pikselach fizycznych: w `GuiRenderer.begin` macierz jest skalowana o `1 / window.getScaleFactor()`, więc linie są ostre niezależnie od GUI scale. [KOD]
+Potem rysujesz przez `RenderSystem.getCompiledPipeline(pipeline)`. **Ta droga daje pełną kontrolę nad własnymi przebiegami** (offscreen, post-process) niezależnie od rejestru vanilli.
 
-Dwa ważne szczegóły [KOD]:
-- Hook woła `guiState.clear()` **przed** własnym rysowaniem. Moja interpretacja: żeby przy ponownym „spłukaniu" nie narysować drugi raz tego, co vanilla już wyświetliła. [WIEDZA co do przyczyny]
-- Pipeline'y Meteora do świata (3D) używają osobnego mixinu w `renderWorld` (przed `"hand"`), z własnymi macierzami `RenderSystem.getModelViewStack()`.
+## 3. Jak rysować własne GUI na wierzchu
 
-## 3. Pętla rysowania krok po kroku
+### Metoda A: element w pipeline'ie GUI vanilli (LiquidBounce) [KOD]
+- Własny rekord implementujący `GuiElementRenderState` (np. `RoundedRectGuiElementRenderState`), w `buildVertices(VertexConsumer)` dla każdego wierzchołka: `addVertexWith2DPose(pose, x, y).setUv(...).setColor(...).setUv1(...).setUv2(...).setLineWidth(...)`.
+- Metody `pipeline()` i `textureSetup()` zwracają Twój pipeline i ustawienie tekstur (`TextureSetup.noTexture()`).
+- Wysyłka: `graphics.guiRenderState.addGuiElement(state)`. Dostęp do pól `guiRenderState` i `scissorStack` w `GuiGraphicsExtractor` przez access widener. [KOD: `liquidbounce.accesswidener`]
+- Zalety: sortowanie warstw, scissor, `pose()` i batching działają same.
+- Ograniczenie: dane elementu muszą wejść w atrybuty wierzchołków (LiquidBounce koduje rozmiar i promień jako `ivec2` w `UV1`/`UV2`, zakres do 32767).
 
-Kolejność w `MeshRenderer.end()` [KOD], opisana własnymi słowami:
+### Metoda B: osobny renderer GUI po vanilli (Meteor) [KOD]
+Mixin `GuiRendererMixin`, `@Inject` w metodzie `render` na `@At("TAIL")`:
+1. Pominąć własną instancję (`MeteorMcGuiRenderer`), żeby się nie zapętlić.
+2. `clearDepthTexture(mainRenderTarget().getDepthTexture(), 1.0)`.
+3. Dla swojego ekranu: `new GuiGraphicsExtractor(mc, renderState, mouseX, mouseY)`, wywołanie własnego `renderCustom(...)` / zdarzenia `Render2DEvent`, potem `guiRenderer.render()`.
+4. Na końcu `guiRenderer.endFrame()`.
 
-1. Zbuduj siatkę (wierzchołki + indeksy) w `MeshBuilder` albo użyj gotowych `GpuBuffer`.
-2. Jeśli podano macierz, odłóż kopię na `RenderSystem.getModelViewStack()` (`pushMatrix`, `mul`), a po rysowaniu zdejmij (`popMatrix`).
-3. Zapisz `MeshData` (projekcja + model-view) do dynamicznego bufora uniformów, weź slice.
-4. Otwórz render pass na wskazanym celu (główny framebuffer lub własna tekstura). Głębię dołączaj **tylko** gdy `pipeline.wantsDepthTexture()`.
-5. Ustaw pipeline, uniformy i samplery, bufory, zrób `drawIndexed`, zamknij pass.
-6. Wyczyść stan renderera (singleton).
+Meteor ma **własną, drugą instancję GuiRenderer** i własne pipeline'y (`UI_COLORED`, `UI_TEXTURED`, `UI_TEXT`), a w `WidgetScreen.renderCustom` używa rzutowania „bez skalowania" (`Utils.unscaledProjection()`), czyli pracuje w pikselach fizycznych. Scissor idzie przez `graphics.enableScissor/disableScissor` z własnym stosem. [KOD]
 
-Konsekwencja [KOD]: `MeshRenderer` jest **singletonem z flagą `taken`**; `begin()` rzuca wyjątek, jeśli poprzednie rysowanie nie zostało zakończone `end()`. Nie zagnieżdżaj rysowań. Własny renderer zrób bez singletona, jeśli chcesz warstwy w warstwach.
+**Którą wybrać?** Metoda A dla elementów mieszanych z GUI gry (HUD, własne widgety w vanilli). Metoda B dla w pełni własnego ekranu z własnymi pipeline'ami i efektami. Można łączyć. [WIEDZA co do rekomendacji]
 
-## 4. Przebiegi offscreen i efekty (blur jako wzorzec)
+## 4. Pętla rysowania (Metoda B) krok po kroku [KOD]
 
-Moduł `Blur` Meteora [KOD] pokazuje cały schemat „efekt pełnoekranowy":
+Z `MeshRenderer.end()` w Meteorze `master`, własnymi słowami:
 
-- Tworzy **6 tekstur** (`device.createTexture("Blur - i", 15, TextureFormat.RGBA8, w, h, 1, 1)` + `createTextureView`), każda w skali `1 / 2^i` rozdzielczości okna.
-- Przy zmianie rozdzielczości zamyka i tworzy je od nowa (zdarzenie `ResolutionChangedEvent`).
-- Rysuje w pętli: **down-sampling** do coraz mniejszych tekstur, potem **up-sampling** z powrotem (shadery `blur_down.frag`, `blur_up.frag`), każdy przebieg to osobny `MeshRenderer` z `attachments(target, null)` i `fullscreen()`.
-- Parametry (`u_HalfTexelSize`, `u_Offset`) idą w uniform buffer `BlurData`.
-- Wynik jest komponowany na ekran shaderem `passthrough`.
+1. Zbuduj siatkę w `MeshBuilder` albo użyj gotowych slice'ów.
+2. Wyślij dane na GPU **przez encoder**: `mesh.uploadVertexBuffer(encoder)` i `uploadIndexBuffer(encoder)` (pamięć przejściowa, `transientMemory().uploadGpu`). Offset indeksów **musi być wyrównany** do rozmiaru typu indeksu, inaczej wyjątek.
+3. Zapisz uniform `MeshData` (projekcja + model-view) do dynamicznego bufora.
+4. Otwórz render pass na wskazanym celu (główny `RenderTarget` lub własna tekstura); głębię dołączaj tylko, gdy `pipeline.wantsDepthTexture()`.
+5. Ustaw pipeline, uniformy, tekstury, bufory; `drawIndexed(indexCount, 1, firstIndex, 0, 0)` gdzie `firstIndex = offsetSlice / bajtyIndeksu`.
+6. Zamknij pass (try-with-resources) i zdejmij macierz.
 
-Magiczna stała `15` w `createTexture(…)` to prawdopodobnie maska flag użycia tekstury; w kodzie nie jest nazwana. [WIEDZA co do znaczenia, niezweryfikowane]
+`MeshRenderer` jest nadal **singletonem z flagą `taken`**: nie zagnieżdżaj rysowań. [KOD] Własny renderer rób bez singletona, jeśli chcesz warstwy w warstwach.
 
-Ten sam wzorzec obsługuje: rozmycie tła (frosted glass), poświatę (blur kształtu), cienie z miękką krawędzią, kompozycję warstw z przezroczystością i przejścia między ekranami.
+## 5. Przebiegi offscreen i efekty
 
-## 5. Tekstury i tekst
+### Blur Meteora [KOD]
+Wieloprzebiegowy: łańcuch tekstur o skali `1 / 2^i`, down-sampling potem up-sampling (`blur_down.fsh`, `blur_up.fsh`), parametry (`u_HalfTexelSize`, `u_Offset`) w uniform buffer `BlurData`, wynik kompozycją `passthrough`.
 
-- Klasa `Texture` [KOD] tworzy teksturę przez `createTexture`, widok przez `createTextureView`, sampler z `RenderSystem.getSamplerCache().get(AddressMode…, FilterMode min, FilterMode mag, false)`, a dane wgrywa przez `writeToTexture` z `NativeImage`. Obsługuje formaty `RGBA8` i `RED8`.
-- Tekst: font TTF → atlas jednokanałowy `RED8` (filtr LINEAR) → pipeline `UI_TEXT`, w którym fragment shader mnoży kolor przez wartość z kanału czerwonego tekstury jako alfę. [KOD]
-- Ikony: pakowane do jednego atlasu (`TexturePacker`) i rysowane jednym pipeline'em teksturowanym. [KOD]
+### Blur LiquidBounce [KOD]
+`BlurEffectRenderer` używa `LazyRenderTargetHolder` (cel tworzony leniwie, z głębią lub bez), osobnych shaderów `ui_blur_h` i `ui_blur_v` (rozmycie rozdzielone na poziome i pionowe), samplera `clampToEdge(NEAREST)` i uniformu z min/max alfa; ma też efekty `OutlineShaderRenderer` i `OverlayShaderRenderer`.
 
-## 6. Przepis: dowolny styl, krok po kroku [SZKIC]
+Oba podejścia potwierdzają wzorzec: **cel offscreen → seria przebiegów z pełnoekranowym quadem → kompozycja**. Na nim zbudujesz szkło, glow, cienie, przejścia i dowolny post-process.
 
-> Poniższe to mój projekt na bazie wzorców z sekcji 1–5. Niczego nie skompilowałem.
+## 6. Tekst i tekstury
 
-**Krok 1: jeden pipeline „uber-box" zamiast wielu pipeline'ów.** Format wierzchołków: pozycja 2D, lokalne UV (0..1), kolor wypełnienia, kolor obramowania, oraz kilka kanałów parametrów (rozmiar, promienie czterech rogów, grubość obramowania, miękkość cienia). W jednym shaderze liczysz SDF prostokąta z promieniami per róg, obramowanie, cień i gradient; to pokrywa większość stylów z sekcji 4.5 głównego raportu.
+- Atlas tekstu jako tekstura jednokanałowa i shader mnożący alfę z tekstury przez kolor (`text.fsh`). [KOD]
+- LiquidBounce ma własny `FontManager`, `FontFace`, atlasy (katalog `render/atlas`) oraz fragment shader `font_mask`. [KOD]
+- W 26.x format tekstury to `GpuFormat.RGBA8_UNORM` itd. (zamiast `TextureFormat.RGBA8`). [KOD]
 
-Problem do rozwiązania na początku: Meteor rejestruje własny element tylko typu `POSITION` (`POS2`) i korzysta z gotowych `COLOR`/`UV`. Czy można zarejestrować kilka elementów o `Usage.GENERIC` z większą liczbą floatów, tego nie sprawdziłem. [WIEDZA, niezweryfikowane] Dwie drogi awaryjne:
-- **Tekstura danych:** parametry elementu zapisujesz do małej tekstury `RGBA32F`/`RGBA8`, a w wierzchołku przekazujesz tylko indeks. Pewna i w pełni elastyczna, ale wymaga obsługi dużej liczby elementów.
-- **Tablica struktur w UBO:** zapisujesz parametry wielu elementów w uniform buffer, a z wierzchołka przekazujesz tylko indeks (limit rozmiaru UBO ogranicza liczbę elementów na jedno rysowanie). [WIEDZA]
+## 7. Przepis: dowolny styl, krok po kroku [SZKIC]
 
-**Krok 2: szkic shadera fragmentów (SDF, pisany od zera).**
+> Mój projekt na bazie wzorców z sekcji 1–5. Niczego nie skompilowałem.
+
+**Krok 1: jeden pipeline „uber-box".** W 26.x nie ma już limitu rejestracji elementów, a `VertexFormat.builder(stepRate)` pozwala na dowolne atrybuty z `GpuFormat`. Format: pozycja 2D, lokalne UV, kolor wypełnienia (gradient góra/dół), kolor obramowania, atrybut z rozmiarem, atrybut z czterema promieniami rogów, atrybut z grubością obramowania i parametrem cienia. To usuwa największy problem z 1.21.11 (za mało miejsca na parametry w wierzchołku).
+
+**Opcja zaawansowana: instancing** [WIEDZA, niezweryfikowane]. Skoro `VertexFormat.builder` ma „step rate" a `drawIndexed` przyjmuje liczbę instancji, możliwe jest: binding 0 = wspólny quad, binding 1 = parametry boxa na instancję. Nie widziałem tego w kodzie klientów, więc sprawdź, zanim polegasz.
+
+**Krok 2: shader fragmentów (SDF, pisany od zera).**
 
 ```glsl
-#version 330 core
-in vec2 v_Uv;            // 0..1 w obrębie prostokąta
-in vec2 v_Size;          // szerokość/wysokość w pikselach
-in vec4 v_Radii;         // promienie rogów: x=prawy-górny, y=prawy-dolny, z=lewy-dolny, w=lewy-górny
-in vec4 v_Fill;
-in vec4 v_Border;
-in float v_BorderWidth;
-out vec4 color;
+#version 330
+#extension GL_ARB_separate_shader_objects : require
+
+layout(location = 0) in vec2  v_Uv;           // 0..1 w obrębie prostokąta
+layout(location = 1) in vec4  v_Fill;
+layout(location = 2) in vec4  v_Border;
+layout(location = 3) flat in vec2  v_Size;    // piksele
+layout(location = 4) flat in vec4  v_Radii;   // x=prawy-górny, y=prawy-dolny, z=lewy-dolny, w=lewy-górny
+layout(location = 5) flat in float v_BorderWidth;
+layout(location = 0) out vec4 color;
 
 float sdBox(vec2 p, vec2 b, vec4 r) {
-    // wybór promienia po ćwiartce; zakładamy p.y rosnące ku górze
-    // (przy UV rosnącym w dół zamień role góra/dół)
+    // zakładamy p.y rosnące ku górze (przy UV rosnącym w dół zamień role góra/dół)
     r.xy = (p.x > 0.0) ? r.xy : r.wz;          // prawa strona : lewa strona
     float rr = (p.y > 0.0) ? r.x : r.y;        // góra : dół
     vec2 q = abs(p) - b + rr;
@@ -130,55 +143,73 @@ void main() {
     float aa = max(fwidth(d), 1e-4);
     float shape = 1.0 - smoothstep(-aa, 0.0, d);
     float inner = smoothstep(-v_BorderWidth - aa, -v_BorderWidth + aa, d);
-    vec4 c = mix(v_Fill, v_Border, inner) * vec4(1.0, 1.0, 1.0, shape);
+    vec4 c = mix(v_Fill, v_Border, inner);
+    c.a *= shape;
     if (c.a <= 0.001) discard;
     color = c;
 }
 ```
 
-Kolejność promieni (który róg to `x/y/z/w`) trzeba ustalić zgodnie z tym, jak wypełnisz atrybut; wzór na wybór promienia po ćwiartce to standardowe rozszerzenie SDF. [WIEDZA]
+Wzór na wybór promienia po ćwiartce to standardowe rozszerzenie SDF. [WIEDZA] Vertex shader musi dostarczać wartości z tymi samymi `location`; dla GUI dołącz `#include <minecraft:dynamictransforms.glsl>` i `<minecraft:projection.glsl>` jak w shaderze zaokrąglonego prostokąta LiquidBounce (macierze `ModelViewMat`, `ProjMat`). [KOD]
 
-**Krok 3: wyjście awaryjne „dowolny shader".** Skoro masz pętlę z sekcji 3, rysowanie jednego widgetu własnym shaderem to: osobny pipeline (z własnym blokiem uniformów), `MeshRenderer`-podobny przebieg z własnym uniform bufferem na ten widget. Tylko ten widget przerywa batch.
+**Krok 3: wyjście awaryjne „własny shader".** Dla jednego widgetu: osobny pipeline z własnym `BindGroupLayout` (własne uniformy i tekstury) i render pass z sekcji 4. Tylko ten widget przerywa batch.
 
-**Krok 4: efekty.** Blur tła, cień, poświata i przejścia: schemat z sekcji 4 (tekstury offscreen + dwa przebiegi + kompozycja).
+**Krok 4: efekty.** Blur tła, cień, poświata i przejścia: schemat z sekcji 5.
 
-**Krok 5: styl jako dane.** Motyw (JSON) + warstwa `UiGraphics` z sekcji 4.5 głównego raportu. Widgety nie znają szczegółów rysowania.
+**Krok 5: styl jako dane.** Motyw (JSON) + warstwa `UiGraphics` z sekcji 4.5 głównego raportu.
 
-## 7. Pułapki znalezione w kodzie [KOD]
+## 8. Pułapki znalezione w najnowszym kodzie [KOD]
 
-1. **Prekompilacja jest obowiązkowa.** Bez `precompilePipeline` (po `ShaderLoader.apply`) własny pipeline nie zadziała.
-2. **Limit 32 własnych elementów formatu** w całej grze, współdzielony ze wszystkimi modami.
-3. **Brak wsparcia vanilli dla `LINE_SMOOTH`.** Meteor dodaje to własnym mixinem na `RenderPipeline` (`IRenderPipeline`). Wygładzone linie wymagają więc ingerencji w wnętrza.
-4. **`MeshRenderer` jest singletonem** (patrz sekcja 3), nie zagnieżdżaj rysowań.
-5. **Głębia:** dołączaj ją do render passu tylko, gdy pipeline jej chce; po GUI czyść głębię, inaczej własne elementy mogą zostać przycięte.
-6. **Uniformy dynamiczne:** `DynamicUniformStorage` trzeba czyścić raz na klatkę (`clear`/`flipFrame`), inaczej rośnie bez końca.
-7. **Rozmiary tekstur przy zmianie okna:** wszystkie tekstury offscreen trzeba tworzyć na nowo (`ResolutionChangedEvent` w Meteorze).
-8. **Kompatybilność:** Meteor ma osobne mixiny i warunkowe ładowanie dla Sodium, Iris itd. Własny rendering może z nimi kolidować.
+1. **Tylko `renderpearl.api`.** Backendy (GL/Vulkan/Metal) różnią się; Meteor musi dublować mixiny przy każdym dotknięciu wnętrz urządzenia. Dla scissora używaj `graphics.enableScissor`/`pass.enableScissor`.
+2. **`layout(location = N)` na każdym `in`/`out`**, razem z `GL_ARB_separate_shader_objects`.
+3. **Kompilacja pipeline'u:** albo `RenderPipelines.register`, albo własny `compilePipeline` + `cache.insert` w hooku `ShaderManager.apply`. Bez tego pipeline nie zadziała.
+4. **`MeshRenderer` jest singletonem.** Nie zagnieżdżaj rysowań.
+5. **Wyrównanie bufora indeksów** do rozmiaru `IndexType` (offset slice'a), inaczej wyjątek.
+6. **Pamięć przejściowa vs trwałe bufory:** `transientMemory().uploadGpu` dla danych na jedną klatkę, `createBuffer` dla trwałych (np. quad pełnoekranowy).
+7. **Dynamiczne uniformy** trzeba zamykać raz na klatkę (`endFrame()`), inaczej rosną.
+8. **Kolor premultiplikowany:** przeglądarkowe tekstury (CEF) wymagają `BlendFunction.TRANSLUCENT_PREMULTIPLIED_ALPHA` (tak robi LiquidBounce dla pipeline'ów `browser/*`).
+9. **Kompatybilność z modami renderującymi** (Sodium, Iris): Meteor ma osobne mixiny, np. dla Sodium.
 
-## 8. Co zweryfikować przy pierwszym uruchomieniu
+## 9. Co zweryfikować przy pierwszym uruchomieniu
 
-- [ ] Czy `RenderPipeline.Builder` w Twojej wersji (Mojang mappings) ma te same metody (`withSampler`, `withUniform`, `withBlend`…).
-- [ ] Czy da się zarejestrować kilka własnych elementów wierzchołka o większej liczbie floatów (sekcja 6).
-- [ ] Konwencja ścieżek shaderów (`shaders/*.vert` jak w Meteorze vs vanillowe `shaders/core`).
-- [ ] Znaczenie flag w `createTexture(…, 15, …)`.
-- [ ] Czy compute shadery są dostępne w `GpuDevice`.
-- [ ] Wydajność uber-shadera i pasów blur na słabszym GPU.
+- [ ] Dokładne sygnatury `RenderPipeline.Builder`, `VertexFormat.builder`, `BindGroupLayout` w Twoim buildzie 26.x.
+- [ ] Czy niezerowy „step rate" daje instancing (sekcja 7) i czy `withVertexBinding` przyjmuje kolejne indeksy.
+- [ ] Które wartości `GpuFormat` są dozwolone dla atrybutów wierzchołków (np. `RGBA32_FLOAT`).
+- [ ] Znaczenie liczby `15` (flagi) w `createTexture(label, 15, …)` w kodzie Meteora.
+- [ ] Wydajność uber-shadera i pasów blur na Vulkanie/Metalu, nie tylko GL.
+- [ ] Czy compute shadery są dostępne w `renderpearl.api`.
 
-## 9. Licencja
+## 10. Licencja
 
-Meteor Client to **GPL-3.0**. Ten dokument opisuje wzorce i API oraz zawiera wyłącznie mój własny kod. Nie kopiuj kodu Meteora do własnego projektu, jeśli nie chcesz objąć go GPL-em.
+Meteor Client i LiquidBounce to **GPL-3.0**. Ten dokument opisuje wzorce i API oraz zawiera wyłącznie mój własny kod. Nie kopiuj kodu klientów do własnego projektu, jeśli nie chcesz objąć go GPL-em.
 
-## 10. Źródła
+## 11. Źródła
 
-| Plik w Meteor @`4803071` | Co z niego |
+| Plik | Co z niego |
 |---|---|
-| `renderer/MeshRenderer.java` | pętla render passu, singleton |
-| `renderer/MeteorRenderPipelines.java` | definicje pipeline'ów, `precompile` |
-| `renderer/MeteorVertexFormats.java`, `MeteorVertexFormatElements.java` | formaty i rejestracja elementów (limit 32) |
-| `renderer/MeshUniforms.java` | `DynamicUniformStorage`, `Std140Builder` |
-| `renderer/ExtendedRenderPipelineBuilder.java` | rozszerzenie buildera o `LINE_SMOOTH` |
-| `renderer/Texture.java`, `FullScreenRenderer.java` | tekstury, współdzielony quad pełnoekranowy |
-| `mixin/GameRendererMixin.java` | hooki po `GuiRenderer.render`, flush stanu GUI |
-| `mixin/ShaderLoaderMixin.java` | prekompilacja po `ShaderLoader.apply` |
-| `systems/modules/render/Blur.java` | schemat wieloprzebiegowego efektu |
-| `assets/meteor-client/shaders/*` | konwencja shaderów (`pos_color`, `text`, `blur_down`) |
+| Meteor `e3a2e77`: `renderer/MeshRenderer.java`, `MeshBuilder.java`, `MeshUniforms.java` | pętla render passu, upload przez encoder, dynamiczne uniformy |
+| Meteor: `renderer/MeteorRenderPipelines.java`, `MeteorVertexFormats.java` | definicje pipeline'ów, bind groupy, `compilePipeline`/`cache.insert` |
+| Meteor: `mixin/ShaderManagerMixin.java`, `GuiRendererMixin.java`, `GlDeviceMixin.java`, `VulkanDeviceMixin.java` | hook kompilacji, hook GUI po vanilli, backendy |
+| Meteor: `gui/WidgetScreen.java`, `assets/meteor-client/shaders/*.vsh|fsh` | ekran z `renderCustom`, konwencja shaderów |
+| LiquidBounce `2a3762a`: `render/ClientRenderPipelines.kt`, `ClientVertexFormats.kt`, `RenderPassExtensions.kt` | rejestracja pipeline'ów, formaty, rozszerzenia render passu |
+| LiquidBounce: `render/gui/element/RoundedRectGuiElementRenderState.java`, `Render2D.kt`, `liquidbounce.accesswidener` | element GUI z własnym pipeline'em, `addGuiElement`, dostęp do pól |
+| LiquidBounce: `render/engine/BlurEffectRenderer.kt`, `shaders/gui/rounded_rect.vsh`, `shaders/blur/*` | blur wielotargetowy, shader GUI |
+
+---
+
+## Dodatek A: różnice 1.21.11 → 26.3 (dla porównania)
+
+| Obszar | 1.21.11 (gałąź `1.21.11` Meteora) | 26.3 (`master`) |
+|---|---|---|
+| Pakiet GPU | `com.mojang.blaze3d.*` (`RenderPipeline`, `RenderPass`, `GpuBuffer`…) | `com.mojang.renderpearl.api.*` |
+| Nazwy | Yarn (`MinecraftClient`, `DrawContext`, `Framebuffer`) | Mojang (`Minecraft`, `GuiGraphicsExtractor`, `RenderTarget`) |
+| Format wierzchołków | `VertexFormat.builder().add("X", VertexFormatElement…)`, własne elementy rejestrowane z limitem 32 | `VertexFormat.builder(stepRate).addAttribute("X", GpuFormat.…)`, bez limitu |
+| Uniformy i tekstury | `withUniform(…)`, `withSampler("u_Texture")` | `BindGroupLayout` z `UniformType.UNIFORM_BUFFER` / `COMBINED_IMAGE_SAMPLER` |
+| Topologia/głębia/blend | `DrawMode`, `withDepthTestFunction`, `withDepthWrite`, `withBlend` | `PrimitiveTopology`, `DepthStencilState`, `ColorTargetState` |
+| Kompilacja | `device.precompilePipeline(pipeline, (id, type) -> źródło)` po `ShaderLoader.apply` | `device.compilePipeline(…)` + `cache.insert(…)` w `ShaderManager.apply`, lub `RenderPipelines.register` |
+| Rysowanie | `pass.setPipeline(pipeline)`, `bindTexture`, `drawIndexed(0, 0, count, 1)` | `setPipeline(getCompiledPipeline(…))`, `setUniform(name, view, sampler)`, `drawIndexed(count, 1, firstIndex, 0, 0)` |
+| Wysyłka danych | `GpuBuffer` przez `createBuffer` | dodatkowo `transientMemory().uploadGpu` → `GpuBufferSlice` |
+| Shadery | `.vert` / `.frag`, `layout(location)` tylko na atrybutach wejściowych | `.vsh` / `.fsh`, `layout(location)` na wszystkim, `#include <minecraft:…>` |
+| GUI | `GuiGraphics`, `submitGuiElement` | `GuiGraphicsExtractor`, `addGuiElement` |
+| Hook „na wierzchu" | `GameRenderer.render` po `GuiRenderer.render(...)`, ręczny flush stanu | `GuiRenderer.render` na `TAIL`, druga instancja GuiRenderer |
+| Backendy | OpenGL | OpenGL, Vulkan, Metal |
