@@ -16,6 +16,21 @@ Każde twierdzenie ma znacznik. Czytaj go zanim zaufasz kodowi.
 | **[WIEDZA]** | Moja wiedza ogólna. **Niezweryfikowana** w tej sesji. Traktuj jako hipotezę. |
 | **[SZKIC]** | Kod napisany przeze mnie na podstawie wzorców z [KOD]. **Nie był kompilowany ani uruchamiany.** |
 
+## Spis treści
+
+0. [TL;DR: decyzje na start](#0-tldr-decyzje-które-warto-podjąć-od-razu)
+1. [Jak rozumiem zadanie](#1-jak-rozumiem-zadanie)
+2. [Wersje i toolchain](#2-wersje-i-toolchain)
+3. [Anatomia nowoczesnego klienta](#3-anatomia-nowoczesnego-klienta)
+4. [Silnik renderowania w 1.21.11](#4-silnik-renderowania-w-12111-to-co-musisz-wiedzieć) (w tym wybór ścieżki GUI: 4.3, tryb bez ograniczeń: 4.4)
+5. [Zaokrąglone rogi](#5-zaokrąglone-rogi)
+6. [Menu i ClickGUI](#6-menu-i-clickgui-układ-widgety-motyw-animacje-tekst)
+7. [Testowanie i debugowanie GUI](#7-testowanie-i-debugowanie-gui)
+8. [Ryzyka i zgodność](#8-ryzyka-i-zgodność)
+9. [Luki i ograniczenia badania](#9-luki-i-ograniczenia-tego-badania)
+10. [Proponowana architektura i plan](#10-proponowana-architektura-i-plan)
+11. [Źródła](#11-źródła-wszystkie-pierwotne-repozytoria-sklonowane-do-scratchpada)
+
 ---
 
 ## 0. TL;DR: decyzje, które warto podjąć od razu
@@ -44,7 +59,7 @@ Alternatywna interpretacja: osobny launcher/aplikacja desktopowa poza grą. Tego
 
 | Element | 1.21.11 | 26.x (nowsze) |
 |---|---|---|
-| Najnowsza stabilna wersja w repozytoriach | – | **26.3** (przykładowy mod, Fabric API, Meteor `master` i LiquidBounce celują w 26.3); Fabric API ma już gałąź `26.4` (snapshot `26.4-snapshot-7`) [KOD] |
+| Najnowsza stabilna wersja w repozytoriach | 1.21.11 to ostatnia wersja z obfuskacją [DOK] | **26.3** (przykładowy mod, Fabric API, Meteor `master` i LiquidBounce celują w 26.3); Fabric API ma już gałąź `26.4` (snapshot `26.4-snapshot-7`) [KOD] |
 | Java | **21** [KOD: `release = 21`, `fabric.mod.json`: `java >=21`] | **25** [KOD: komentarz w `libs.versions.toml` LiquidBounce, [DOK] porting 26.1] |
 | Obfuskacja | **tak** (ostatnia wersja) [DOK] | **brak** [DOK] |
 | Plugin Loom | `net.fabricmc.fabric-loom-remap` [DOK/KOD] | `net.fabricmc.fabric-loom` [DOK] |
@@ -225,6 +240,17 @@ GUI to aplikacja webowa (Svelte 5 + Vite, Inter, SCSS) renderowana przez wbudowa
 Zalety: CSS daje zaokrąglone rogi, cienie, blur i animacje „za darmo", motywowanie i hot reload; najbliżej „desktopowego" wyglądu. Wady: natywne zależności per system operacyjny, osobny stos technologiczny, opóźnienie wejścia, trudniejsza dystrybucja jednym jarem.
 
 **Rekomendacja:** B dla HUD i paneli, w podklasie `Screen` z własnym drzewem widgetów. Jeśli priorytetem jest efekt „wow" i szybka iteracja nad wyglądem, rozważ D jako projekt równoległy, ale wiedząc, co kosztuje.
+
+#### Którą ścieżkę wybrać
+
+| Twój priorytet | Ścieżka | Dlaczego | Główny koszt |
+|---|---|---|---|
+| Szybki prototyp, minimum kodu | **A** | tylko vanilla API i zasoby | stały promień rogów, brak AA przy skalowaniu |
+| Ładne GUI, rozsądny koszt, zgodność z grą | **B** (domyślna) | wchodzi w warstwy, scissor i batching vanilli | dotyka wnętrz API (class tweakery), zmieniają się w 26.x |
+| Pełna kontrola: blur, cienie, własny tekst, efekty | **C** (sekcja 4.4) | własny silnik 2D i render passy | najwięcej własnego kodu i kolizji z innymi modami |
+| Najlepszy wygląd i szybka iteracja nad nim | **D** | CSS, animacje, hot reload | natywne zależności, osobny stos, trudna dystrybucja |
+
+Ścieżki można łączyć, np. B dla HUD i prostych paneli, a C lub D tylko dla jednego „efektownego" ekranu.
 
 ### 4.4 Tryb „bez ograniczeń": własny silnik renderowania (ścieżka C rozwinięta)
 
@@ -500,6 +526,7 @@ Okno/panel (przeciągalny, zwijalny), lista kategorii/modułów, wiersz modułu 
 - **Sieć:** sesja miała dostęp do `git clone` z GitHuba i Maven Central, ale **nie** do `docs.fabricmc.net`, `fabricmc.net`, `maven.fabricmc.net`, `meta.fabricmc.net`, serwerów Mojang, `minecraft.wiki` i Modrinth. Dlatego dokumentację Fabric czytałem z repozytorium `fabric-docs`, a nie ze strony.
 - **Brak JAR-a Minecrafta 1.21.11:** zero kompilacji i uruchomień. Każda sygnatura z 1.21.11 pochodzi z kodu LiquidBounce@`0a3d2a25`, referencji `fabric-docs` dla 1.21.11 i gałęzi `1.21.11` Fabric API.
 - **Niezweryfikowane:** szczegóły 9-slice w vanilli, konwencja ścieżek shaderów, własne providery TTF vanilli, wydajność, treść Mojang EULA.
+- **Próba weryfikacji (2026-11-06):** przeszukałem `fabric-docs` (commit `2e637f7`) pod kątem 9-slice (`nine_slice`), ścieżek shaderów (`shaders/core`, `.vsh`/`.fsh`) i providerów TTF. **Brak jakiejkolwiek wzmianki**, więc te twierdzenia zostają jako `[WIEDZA]`. Rozstrzygnie je dopiero kod lub pliki zasobów samej gry (JAR Minecrafta).
 - **Nie badałem:** `owo-lib` (deklaratywne UI, ma gałąź `1.21.11`), `imgui-java` (binding Dear ImGui; ma backend LWJGL3/OpenGL, a w 1.21.11 rysowanie idzie przez abstrakcję `GpuDevice`, więc mieszanie surowego GL jest ryzykowne; **zero dowodów** integracji z MC w sklonowanym repo). To kandydaci do osobnego badania.
 - **Rozbieżne wersje narzędzi** (tabela w 2.2): nie rozstrzygnąłem, które są „zalecane".
 
@@ -532,6 +559,14 @@ Fazy:
 4. **Moduły przykładowe:** HUD, rysowanie 3D przez własny pipeline (wzorzec „render przez ściany" z `fabric-docs` `rendering/world.md`), narzędzia.
 5. **Testy:** client game tests ze zrzutami ekranu.
 6. **Twardnienie i migracja:** warstwa abstrakcji, przygotowanie do 26.x.
+
+### 10.1 Następne kroki (kolejność sugerowana)
+
+1. Zbudować szkielet z szablonu `fabric-example-mod` (gałąź `1.21.11`) i sprawdzić, czy kompiluje się z wersjami z tabeli w 2.2. To rozstrzyga rozbieżność Loader/Loom.
+2. Uruchomić pierwszy zaokrąglony prostokąt (sekcja 5.3) i zweryfikować sygnatury oraz ścieżki shaderów, które oznaczono jako `[SZKIC]`/`[WIEDZA]`.
+3. Zdecydować, czy nawet przy ścieżce B potrzebny jest własny tekst (atlas STB), czy wystarczy vanilla `drawString`.
+4. Rozstrzygnąć interpretację zadania (sekcja 1): mod w grze czy osobny launcher.
+5. Osobne badania: `owo-lib`, `imgui-java` (sekcja 9).
 
 ---
 
