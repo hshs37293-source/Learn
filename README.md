@@ -1,6 +1,10 @@
 # Learn
 
-Notatki z nauki i research.
+Notatki z nauki i research oraz projekty.
+
+## Projekty
+
+- [`mcgui/`](mcgui/README.md): biblioteka GUI 2D i 3D w dowolnym stylu dla modów Minecraft (1.21.11 i 26.x, nazwy Mojang). Rdzeń jest w czystym Javie i ma testy (51 zaliczonych); adaptery pod grę są niekompilowane, patrz README projektu.
 
 ## Research
 

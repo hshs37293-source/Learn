@@ -1,0 +1,34 @@
+// mcgui dla Minecrafta 26.x (bez obfuskacji, nazwy Mojang, Java 25).
+// NIEKOMPILOWANE w środowisku, w którym powstało (brak dostępu do serwerów Fabric/Mojang) — patrz ../README.md.
+plugins {
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+    id 'maven-publish'
+}
+
+// Rdzeń (czysty Java 21, bez zależności od Minecrafta) dołączamy jako źródła.
+// Bajtkod docelowy: Java 25 dla całego projektu; rdzeń jest kompatybilny źródłowo.
+sourceSets {
+    main {
+        java.srcDir '../core/src/main/java'
+        resources.srcDir '../core/src/main/resources'
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand 'version': project.version }
+}
+
+tasks.withType(JavaCompile).configureEach { it.options.release = 25 }
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}

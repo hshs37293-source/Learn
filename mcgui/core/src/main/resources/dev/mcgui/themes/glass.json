@@ -1,0 +1,45 @@
+{
+  "name": "glass",
+  "tokens": {
+    "color.glass": "#ffffff1f",
+    "color.glass.hover": "#ffffff33",
+    "color.glass.press": "#ffffff4d",
+    "color.edge": "#ffffff55",
+    "color.text": "#ffffff",
+    "color.accent": "#7ad7ff",
+    "radius.m": 8,
+    "radius.l": 14
+  },
+  "rules": {
+    "widget": { "text": { "color": "$color.text", "size": 9, "shadow": true }, "transition": 220, "easing": "ease" },
+    "panel": {
+      "fill": { "type": "linear", "direction": "vertical", "from": "#ffffff2e", "to": "#ffffff14" },
+      "radius": "$radius.l", "padding": 10,
+      "border": { "width": 1, "color": "$color.edge" },
+      "shadow": [ { "dy": 8, "blur": 24, "color": "#00000055" } ],
+      "layer": { "backdropBlur": 12 }
+    },
+    "button": {
+      "fill": "$color.glass", "radius": "$radius.m", "padding": [5, 12], "minHeight": 18,
+      "border": { "width": 1, "color": "#ffffff44" },
+      "states": {
+        "hover":   { "fill": "$color.glass.hover" },
+        "pressed": { "fill": "$color.glass.press" },
+        "focused": { "border": { "width": 1, "color": "$color.accent" } }
+      }
+    },
+    "button.primary": { "fill": "#7ad7ff55", "border": { "width": 1, "color": "#7ad7ffcc" } },
+    "toggle": { "fill": "#ffffff2a", "radius": 6, "minWidth": 24, "minHeight": 12,
+      "border": { "width": 1, "color": "#ffffff44" }, "states": { "active": { "fill": "#7ad7ff99" } } },
+    "toggle.knob": { "fill": "#ffffffee", "radius": 6 },
+    "slider": { "fill": "#ffffff2a", "radius": 3, "minHeight": 6 },
+    "slider.fill": { "fill": "#7ad7ffcc", "radius": 3 },
+    "slider.knob": { "fill": "#ffffffee", "radius": 6, "shadow": [ { "dy": 1, "blur": 4, "color": "#00000066" } ] },
+    "textfield": { "fill": "#00000033", "radius": "$radius.m", "padding": [4, 6], "minHeight": 16,
+      "border": { "width": 1, "color": "#ffffff44" }, "states": { "focused": { "border": { "width": 1, "color": "$color.accent" } } } },
+    "progress": { "fill": "#ffffff22", "radius": 3, "minHeight": 6 },
+    "progress.fill": { "fill": "#7ad7ffcc", "radius": 3 },
+    "scrollbar": { "fill": "#ffffff44", "radius": 2 },
+    "viewport": { "fill": "#00000044", "radius": "$radius.m", "border": { "width": 1, "color": "#ffffff44" } }
+  }
+}

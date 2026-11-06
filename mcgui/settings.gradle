@@ -1,0 +1,4 @@
+// Rdzeń (czysty Java, bez Minecrafta) — buduje się i testuje bez dostępu do serwerów Fabric/Mojang.
+// Adaptery mc-1_21_11 i mc-26 to OSOBNE projekty Gradle (inne pluginy Loom) — buduj je z ich katalogów.
+rootProject.name = 'mcgui'
+include 'core'

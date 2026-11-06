@@ -1,0 +1,35 @@
+// mcgui dla Minecrafta 1.21.11 (nazwy Mojang). NIEKOMPILOWANE w środowisku, w którym powstało
+// (brak dostępu do serwerów Fabric/Mojang) — patrz ../README.md.
+plugins {
+    id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+    id 'maven-publish'
+}
+
+// Rdzeń (czysty Java 21, bez zależności od Minecrafta) dołączamy jako źródła: dzięki temu nie trzeba
+// mieszać pluginów Loom w jednym projekcie ani używać jar-in-jar.
+sourceSets {
+    main {
+        java.srcDir '../core/src/main/java'
+        resources.srcDir '../core/src/main/resources'
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand 'version': project.version }
+}
+
+tasks.withType(JavaCompile).configureEach { it.options.release = 21 }
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}

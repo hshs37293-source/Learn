@@ -1,0 +1,40 @@
+{
+  "name": "pixel",
+  "tokens": {
+    "color.light": "#c6c6c6",
+    "color.mid": "#8b8b8b",
+    "color.dark": "#373737",
+    "color.text": "#3f3f3f"
+  },
+  "rules": {
+    "widget": { "text": { "color": "$color.text", "size": 8 }, "transition": 0 },
+    "panel": {
+      "fill": "$color.light", "radius": 0, "padding": 6,
+      "border": { "width": 2, "color": "$color.dark" }
+    },
+    "button": {
+      "fill": "$color.mid", "radius": 0, "padding": [4, 8], "minHeight": 16,
+      "border": { "width": 2, "color": "$color.dark" },
+      "text": { "color": "#ffffff", "size": 8, "shadow": true },
+      "states": {
+        "hover":   { "fill": "#7a8bd8" },
+        "pressed": { "fill": "#5f6fbb" },
+        "disabled":{ "fill": "#6b6b6b", "text": { "color": "#a0a0a0" } }
+      }
+    },
+    "button.primary": { "fill": "#55aa55", "states": { "hover": { "fill": "#66cc66" } } },
+    "toggle": { "fill": "$color.dark", "radius": 0, "minWidth": 22, "minHeight": 12,
+      "border": { "width": 2, "color": "$color.dark" }, "states": { "active": { "fill": "#55aa55" } } },
+    "toggle.knob": { "fill": "$color.light", "radius": 0 },
+    "slider": { "fill": "$color.dark", "radius": 0, "minHeight": 6 },
+    "slider.fill": { "fill": "#55aa55", "radius": 0 },
+    "slider.knob": { "fill": "$color.light", "radius": 0, "border": { "width": 2, "color": "$color.dark" } },
+    "textfield": { "fill": "#000000", "radius": 0, "padding": [3, 5], "minHeight": 14,
+      "border": { "width": 2, "color": "$color.mid" }, "text": { "color": "#ffffff", "size": 8 },
+      "states": { "focused": { "border": { "width": 2, "color": "#ffffff" } } } },
+    "progress": { "fill": "$color.dark", "radius": 0, "minHeight": 6 },
+    "progress.fill": { "fill": "#55aa55", "radius": 0 },
+    "scrollbar": { "fill": "$color.dark", "radius": 0 },
+    "viewport": { "fill": "#000000", "radius": 0, "border": { "width": 2, "color": "$color.dark" } }
+  }
+}

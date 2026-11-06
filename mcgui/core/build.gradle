@@ -1,0 +1,26 @@
+plugins {
+    id 'java-library'
+}
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.encoding = 'UTF-8'
+}
+
+sourceSets {
+    test { java.srcDir 'src/test/java' }
+}
+
+// Bez JUnit: własny runner (dev.mcgui.TestMain), kod wyjścia != 0 przy błędzie.
+tasks.register('runTests', JavaExec) {
+    group = 'verification'
+    description = 'Uruchamia testy rdzenia (TestMain)'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.mcgui.TestMain'
+    systemProperty 'file.encoding', 'UTF-8'
+}
+tasks.named('check') { dependsOn 'runTests' }

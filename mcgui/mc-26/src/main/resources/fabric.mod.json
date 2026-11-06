@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "mcgui",
+  "version": "${version}",
+  "name": "mcgui",
+  "description": "Biblioteka GUI 2D i 3D z motywami i stylami (rdzeń niezależny od wersji gry).",
+  "license": "CC0-1.0",
+  "environment": "client",
+  "entrypoints": {
+    "client": [ "dev.mcgui.mc.McGuiClient" ]
+  },
+  "depends": {
+    "fabricloader": ">=0.20.1",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

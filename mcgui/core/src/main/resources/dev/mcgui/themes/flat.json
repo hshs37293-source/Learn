@@ -1,0 +1,64 @@
+{
+  "name": "flat",
+  "tokens": {
+    "color.bg": "#1b1d23",
+    "color.panel": "#262932",
+    "color.panel2": "#2f333e",
+    "color.accent": "#4677ff",
+    "color.accent.hover": "#5f8bff",
+    "color.accent.press": "#3560dd",
+    "color.text": "#e8eaf0",
+    "color.muted": "#9aa1b2",
+    "color.disabled": "#5b6070",
+    "radius.s": 3,
+    "radius.m": 5,
+    "radius.l": 8,
+    "motion.fast": 160
+  },
+  "rules": {
+    "widget": { "text": { "color": "$color.text", "size": 9 }, "transition": "$motion.fast", "easing": "ease" },
+    "label": { "text": { "color": "$color.text", "size": 9 } },
+    "panel": {
+      "fill": "$color.panel", "radius": "$radius.l", "padding": 8,
+      "shadow": [ { "dx": 0, "dy": 3, "blur": 10, "color": "#00000066" } ]
+    },
+    "button": {
+      "fill": "$color.panel2", "radius": "$radius.m", "padding": [5, 10], "minHeight": 18,
+      "text": { "color": "$color.text", "size": 9 },
+      "states": {
+        "hover":    { "fill": "#3a3f4d" },
+        "pressed":  { "fill": "#454b5c" },
+        "focused":  { "border": { "width": 1, "color": "$color.accent" } },
+        "disabled": { "fill": "#22252d", "text": { "color": "$color.disabled" } }
+      }
+    },
+    "button.primary": {
+      "fill": "$color.accent",
+      "states": {
+        "hover":   { "fill": "$color.accent.hover" },
+        "pressed": { "fill": "$color.accent.press" }
+      }
+    },
+    "toggle": {
+      "fill": "#3a3f4d", "radius": 6, "minWidth": 24, "minHeight": 12,
+      "states": { "active": { "fill": "$color.accent" }, "hover": { "fill": "#454b5c" } }
+    },
+    "toggle.knob": { "fill": "#ffffff", "radius": 6 },
+    "slider": { "fill": "#3a3f4d", "radius": 3, "minHeight": 6 },
+    "slider.fill": { "fill": "$color.accent", "radius": 3 },
+    "slider.knob": {
+      "fill": "#ffffff", "radius": 6,
+      "shadow": [ { "dy": 1, "blur": 3, "color": "#00000088" } ],
+      "states": { "hover": { "fill": "#e6ecff" }, "pressed": { "fill": "#cdd9ff" } }
+    },
+    "textfield": {
+      "fill": "#1f2128", "radius": "$radius.m", "padding": [4, 6], "minHeight": 16,
+      "border": { "width": 1, "color": "#3a3f4d" },
+      "states": { "focused": { "border": { "width": 1, "color": "$color.accent" } } }
+    },
+    "progress": { "fill": "#2f333e", "radius": 3, "minHeight": 6 },
+    "progress.fill": { "fill": "$color.accent", "radius": 3 },
+    "scrollbar": { "fill": "#ffffff33", "radius": 2, "states": { "hover": { "fill": "#ffffff66" } } },
+    "viewport": { "fill": "#14161b", "radius": "$radius.m", "border": { "width": 1, "color": "#3a3f4d" } }
+  }
+}
